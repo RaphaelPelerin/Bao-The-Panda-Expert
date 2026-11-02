@@ -1,0 +1,166 @@
+import { Suspense, lazy, useEffect, useRef, useState, type FormEvent } from "react";
+import type { Lang } from "../shared/protocol";
+import { useConversation } from "./state/useConversation";
+import { DebugPanel } from "./ui/DebugPanel";
+import { KeyboardIcon, LeafIcon, MicIcon, SendIcon } from "./ui/icons";
+import { MicButton } from "./ui/MicButton";
+import { STRINGS } from "./ui/strings";
+
+// three.js is the heaviest part of the bundle; the UI shows while it loads.
+const Scene = lazy(() => import("./scene/Scene").then((m) => ({ default: m.Scene })));
+
+export function App() {
+  const { state, lang, sttSupported, toggleMic, ask, interrupt, changeLang } = useConversation();
+  const t = STRINGS[lang];
+  const [typing, setTyping] = useState(!sttSupported);
+  const [draft, setDraft] = useState("");
+  const [showDebug, setShowDebug] = useState(false);
+  const input = useRef<HTMLInputElement>(null);
+
+  const busy = state.status === "thinking" || state.status === "speaking";
+  const onMic = () => (busy ? interrupt() : toggleMic());
+
+  // Space talks, Escape interrupts, D toggles the latency panel.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.target instanceof HTMLInputElement || event.repeat) return;
+      if (event.code === "Space" && sttSupported) {
+        event.preventDefault();
+        onMic();
+      } else if (event.code === "Escape") {
+        interrupt();
+      } else if (event.key.toLowerCase() === "d") {
+        setShowDebug((v) => !v);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+
+  useEffect(() => {
+    if (typing) input.current?.focus();
+  }, [typing]);
+
+  // Long answers scroll inside the subtitle card; keep the latest words in view.
+  const subtitles = useRef<HTMLElement>(null);
+  useEffect(() => {
+    subtitles.current?.scrollTo({ top: subtitles.current.scrollHeight });
+  }, [state.answer]);
+
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    if (!draft.trim()) return;
+    ask(draft);
+    setDraft("");
+  };
+
+  const status = state.status === "error" ? state.error : t.status[state.status];
+  const hasExchange = Boolean(state.transcript || state.answer);
+
+  return (
+    <div className="app" data-phase={state.status}>
+      <Suspense fallback={<div className="scene-loading" />}>
+        <div className="scene">
+          <Scene />
+        </div>
+      </Suspense>
+
+      <header className="topbar">
+        <div className="brand">
+          <span className="brand-mark">
+            <LeafIcon />
+          </span>
+          <div>
+            <h1>Bao</h1>
+            <p>{t.tagline}</p>
+          </div>
+        </div>
+        <div className="lang glass" role="group" aria-label="Language">
+          {(["en", "fr"] as Lang[]).map((code) => (
+            <button key={code} aria-pressed={lang === code} onClick={() => changeLang(code)}>
+              {code.toUpperCase()}
+            </button>
+          ))}
+        </div>
+      </header>
+
+      <main className="dock">
+        {hasExchange ? (
+          <section ref={subtitles} className="subtitles glass" aria-live="polite">
+            {state.transcript && (
+              <p className="subtitle-user">
+                <span>{t.you}</span> {state.transcript}
+              </p>
+            )}
+            {state.answer ? (
+              <p className={`subtitle-panda${state.inScope === false ? " is-refusal" : ""}`}>{state.answer}</p>
+            ) : (
+              state.status === "thinking" && (
+                <p className="subtitle-panda subtitle-dots" aria-label={t.status.thinking}>
+                  <i />
+                  <i />
+                  <i />
+                </p>
+              )
+            )}
+          </section>
+        ) : (
+          state.status === "idle" && (
+            <ul className="suggestions" aria-label="Suggestions">
+              {t.suggestions.map((s) => (
+                <li key={s}>
+                  <button className="chip glass" onClick={() => ask(s)}>
+                    {s}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )
+        )}
+
+        {!sttSupported && <p className="notice glass">{t.noVoice}</p>}
+
+        <p className={`status${state.status === "error" ? " is-error" : ""}`} role="status">
+          {status}
+        </p>
+
+        <div className="controls">
+          {sttSupported && (
+            <button
+              className="icon-button glass"
+              onClick={() => setTyping((v) => !v)}
+              aria-label={typing ? t.useMic : t.typeInstead}
+              title={typing ? t.useMic : t.typeInstead}
+            >
+              {typing ? <MicIcon /> : <KeyboardIcon />}
+            </button>
+          )}
+          {sttSupported && !typing ? (
+            <MicButton
+              phase={state.status}
+              label={state.status === "idle" || state.status === "error" ? t.micStart : t.micStop}
+              onPress={onMic}
+            />
+          ) : (
+            <form className="ask glass" onSubmit={submit}>
+              <input
+                ref={input}
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                placeholder={t.placeholder}
+                maxLength={500}
+                aria-label={t.placeholder}
+              />
+              <button type="submit" aria-label={t.send} disabled={!draft.trim()}>
+                <SendIcon />
+              </button>
+            </form>
+          )}
+          {sttSupported && <span className="icon-button-spacer" aria-hidden />}
+        </div>
+      </main>
+
+      {showDebug && <DebugPanel title={t.debug} />}
+    </div>
+  );
+}
