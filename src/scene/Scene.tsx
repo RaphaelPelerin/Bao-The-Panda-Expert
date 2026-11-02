@@ -1,4 +1,4 @@
-import { Canvas, useFrame, useThree } from "@react-three/fiber";
+import { Canvas, useFrame } from "@react-three/fiber";
 import { Bloom, EffectComposer, Noise, ToneMapping, Vignette } from "@react-three/postprocessing";
 import { ToneMappingMode } from "postprocessing";
 import { useMemo } from "react";
@@ -6,11 +6,11 @@ import * as THREE from "three";
 import { CAMERA_FOV, CAMERA_PITCH, CAMERA_POSITION, Panda, pandaHead } from "../avatar/Panda";
 import { signals } from "../avatar/signals";
 import { LightShafts, Motes, Sky } from "./Atmosphere";
-import { BambooGroup, forestLayout, makeStalk } from "./Bamboo";
+import { BambooLayers } from "./BambooLayers";
 import { HAZE } from "./environment";
 import { FallingLeaves } from "./FallingLeaves";
 import { Vista } from "./Vista";
-import { seededRandom, windUniforms } from "./wind";
+import { windUniforms } from "./wind";
 
 /** Advances the shared wind clock; the user's voice stirs up a gust. */
 function WindDriver() {
@@ -40,33 +40,6 @@ function CameraRig() {
   return null;
 }
 
-/** Big, close stalks framing the panda on wide screens. Hidden on narrow ones. */
-function ForegroundBamboo() {
-  const { size } = useThree();
-  const aspect = size.width / size.height;
-  const stalks = useMemo(() => {
-    if (aspect < 1.15) return [];
-    const random = seededRandom(5);
-    const z = 3.3;
-    const viewHalfWidth = (CAMERA_POSITION.z - z) * Math.tan(THREE.MathUtils.degToRad(CAMERA_FOV / 2)) * aspect;
-    // Half off-screen at the very edges, so they frame the view without hiding it.
-    return [makeStalk(random, -viewHalfWidth * 0.97, z, true), makeStalk(random, viewHalfWidth * 1.0, z - 0.3, true)].map(
-      // Few leaves up close: they read as big blurry shapes and hide the panda.
-      (stalk) => ({ ...stalk, leaves: 8, radius: stalk.radius * 0.8 }),
-    );
-  }, [aspect]);
-  if (!stalks.length) return null;
-  return <BambooGroup key={aspect.toFixed(2)} stalks={stalks} seed={31} />;
-}
-
-/** The two side groves, re-laid out when the screen shape changes noticeably. */
-function Groves() {
-  const { size } = useThree();
-  const aspect = Math.round((size.width / size.height) * 10) / 10;
-  const stalks = useMemo(() => forestLayout(aspect, CAMERA_POSITION.z, CAMERA_FOV), [aspect]);
-  return <BambooGroup key={aspect} stalks={stalks} seed={13} />;
-}
-
 export function Scene() {
   return (
     <Canvas
@@ -84,12 +57,11 @@ export function Scene() {
       <CameraRig />
       <Sky />
       <Vista />
-      <Groves />
+      <BambooLayers />
       <LightShafts />
       <Motes focus={pandaHead} />
       <FallingLeaves />
       <Panda src="/assets/panda.jpg" />
-      <ForegroundBamboo />
 
       <EffectComposer multisampling={4}>
         {/* High threshold: only sun glints and pollen glow. A lower one blooms the pale

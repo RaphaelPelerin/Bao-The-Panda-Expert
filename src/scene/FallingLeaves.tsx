@@ -1,8 +1,29 @@
 import { useFrame } from "@react-three/fiber";
 import { useMemo, useRef } from "react";
 import * as THREE from "three";
-import { leafGeometry } from "./Bamboo";
 import { seededRandom, windUniforms } from "./wind";
+
+function leafGeometry(): THREE.BufferGeometry {
+  // A slender bamboo leaf along +x from its stem at the origin, slightly cupped.
+  const segments = 8;
+  const positions: number[] = [];
+  const indices: number[] = [];
+  for (let i = 0; i <= segments; i++) {
+    const t = i / segments;
+    const width = 0.13 * Math.sin(Math.PI * Math.pow(t, 0.62)) * (1 - 0.15 * t);
+    const cup = -0.025 * Math.sin(Math.PI * t);
+    positions.push(t, width / 2, cup, t, -width / 2, cup);
+    if (i < segments) {
+      const a = i * 2;
+      indices.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+    }
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  return geometry;
+}
 
 interface FallingLeaf {
   position: THREE.Vector3;
