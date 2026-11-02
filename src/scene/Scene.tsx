@@ -3,14 +3,14 @@ import { Bloom, EffectComposer, Noise, ToneMapping, Vignette } from "@react-thre
 import { ToneMappingMode } from "postprocessing";
 import { useMemo } from "react";
 import * as THREE from "three";
-import { CAMERA_FOV, CAMERA_POSITION, Panda, pandaHead } from "../avatar/Panda";
+import { CAMERA_FOV, CAMERA_PITCH, CAMERA_POSITION, Panda, pandaHead } from "../avatar/Panda";
 import { signals } from "../avatar/signals";
-import { Ground, LightShafts, Motes, Sky } from "./Atmosphere";
+import { LightShafts, Motes, Sky } from "./Atmosphere";
 import { BambooGroup, forestLayout, makeStalk } from "./Bamboo";
+import { HAZE } from "./environment";
 import { FallingLeaves } from "./FallingLeaves";
+import { Vista } from "./Vista";
 import { seededRandom, windUniforms } from "./wind";
-
-const FOG_COLOR = "#b4cfae";
 
 /** Advances the shared wind clock; the user's voice stirs up a gust. */
 function WindDriver() {
@@ -33,7 +33,8 @@ function CameraRig() {
       CAMERA_POSITION.z,
     );
     state.camera.position.lerp(target, Math.min(1, delta * 1.8));
-    lookAt.set(state.camera.position.x * 0.45, CAMERA_POSITION.y, -4);
+    // Ten units ahead, lowered by the pitch: the view dips toward the lake.
+    lookAt.set(state.camera.position.x * 0.45, CAMERA_POSITION.y - 10 * Math.tan(CAMERA_PITCH), -4);
     state.camera.lookAt(lookAt);
   });
   return null;
@@ -48,24 +49,33 @@ function ForegroundBamboo() {
     const random = seededRandom(5);
     const z = 3.3;
     const viewHalfWidth = (CAMERA_POSITION.z - z) * Math.tan(THREE.MathUtils.degToRad(CAMERA_FOV / 2)) * aspect;
-    return [makeStalk(random, -viewHalfWidth * 0.9, z, true), makeStalk(random, viewHalfWidth * 0.93, z - 0.3, true)].map(
+    // Half off-screen at the very edges, so they frame the view without hiding it.
+    return [makeStalk(random, -viewHalfWidth * 0.97, z, true), makeStalk(random, viewHalfWidth * 1.0, z - 0.3, true)].map(
       // Few leaves up close: they read as big blurry shapes and hide the panda.
-      (stalk) => ({ ...stalk, leaves: 8 }),
+      (stalk) => ({ ...stalk, leaves: 8, radius: stalk.radius * 0.8 }),
     );
   }, [aspect]);
   if (!stalks.length) return null;
   return <BambooGroup key={aspect.toFixed(2)} stalks={stalks} seed={31} />;
 }
 
+/** The two side groves, re-laid out when the screen shape changes noticeably. */
+function Groves() {
+  const { size } = useThree();
+  const aspect = Math.round((size.width / size.height) * 10) / 10;
+  const stalks = useMemo(() => forestLayout(aspect, CAMERA_POSITION.z, CAMERA_FOV), [aspect]);
+  return <BambooGroup key={aspect} stalks={stalks} seed={13} />;
+}
+
 export function Scene() {
-  const forest = useMemo(() => forestLayout(), []);
   return (
     <Canvas
       dpr={[1, 1.75]}
       gl={{ antialias: false, powerPreference: "high-performance", stencil: false }}
-      camera={{ position: CAMERA_POSITION.toArray(), fov: CAMERA_FOV, near: 0.1, far: 200 }}
+      camera={{ position: CAMERA_POSITION.toArray(), fov: CAMERA_FOV, near: 0.1, far: 700 }}
     >
-      <fog attach="fog" args={[FOG_COLOR, 5, 34]} />
+      {/* Exponential haze: the groves stay crisp, the lake and mountains fade into the distance. */}
+      <fogExp2 attach="fog" args={[HAZE, 0.011]} />
       <hemisphereLight args={["#eef6d8", "#2f4a26", 1.1]} />
       <directionalLight position={[7, 11, -9]} intensity={2.6} color="#ffe0ad" />
       <directionalLight position={[-4, 3, 6]} intensity={0.55} color="#cfe6ff" />
@@ -73,8 +83,8 @@ export function Scene() {
       <WindDriver />
       <CameraRig />
       <Sky />
-      <Ground />
-      <BambooGroup stalks={forest} seed={13} />
+      <Vista />
+      <Groves />
       <LightShafts />
       <Motes focus={pandaHead} />
       <FallingLeaves />

@@ -1,9 +1,12 @@
 import { useLayoutEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
+import { groundHeight } from "./environment";
 import { WIND_GLSL, seededRandom, tmpMatrix, windUniforms } from "./wind";
 
 export interface Stalk {
   x: number;
+  /** Base height: the stalk stands on the terrain. */
+  y: number;
   z: number;
   height: number;
   radius: number;
@@ -126,6 +129,8 @@ function leafMaterial(): THREE.MeshStandardMaterial {
 export function makeStalk(random: () => number, x: number, z: number, near: boolean): Stalk {
   return {
     x,
+    // Sunk a little so no stalk floats over a bump.
+    y: groundHeight(x, z) - 0.2,
     z,
     height: 9 + random() * 6,
     radius: near ? 0.15 + random() * 0.05 : 0.055 + random() * 0.065,
@@ -134,17 +139,24 @@ export function makeStalk(random: () => number, x: number, z: number, near: bool
   };
 }
 
-/** The forest behind the panda, in two depth bands with a small clearing behind its head. */
-export function forestLayout(): Stalk[] {
+/**
+ * Two bamboo groves on the hilltop, one on each side of the screen, leaving
+ * the middle open onto the lake. Positions are placed in screen space (a share
+ * of the visible half-width at each depth), so the opening holds at any aspect.
+ */
+export function forestLayout(aspect: number, cameraZ: number, fovDegrees: number): Stalk[] {
   const random = seededRandom(7);
+  const tan = Math.tan(THREE.MathUtils.degToRad(fovDegrees / 2));
+  // Phones show little width: start the groves closer to the middle there.
+  const inner = aspect < 0.85 ? 0.45 : 0.6;
   const stalks: Stalk[] = [];
-  for (let i = 0; i < 150; i++) {
-    stalks.push(makeStalk(random, (random() - 0.5) * 34, -8 - random() * 20, false));
-  }
-  for (let i = 0; i < 46; i++) {
-    let x = (random() - 0.5) * 14;
-    if (Math.abs(x) < 1.1) x += Math.sign(x || 1) * 1.1;
-    stalks.push(makeStalk(random, x, -2.4 - random() * 5.6, false));
+  for (let i = 0; i < 120; i++) {
+    const z = -1.5 - random() * 8.5;
+    const halfWidth = (cameraZ - z) * tan * aspect;
+    // Denser toward the screen edges, thinning toward the opening.
+    const u = inner + (1.25 - inner) * Math.sqrt(random());
+    const side = i % 2 ? 1 : -1;
+    stalks.push(makeStalk(random, side * u * halfWidth, z, false));
   }
   return stalks;
 }
@@ -175,7 +187,7 @@ export function BambooGroup({ stalks, seed }: { stalks: Stalk[]; seed: number })
       // Stalks lean very slightly, like real culms competing for light.
       euler.set((random() - 0.5) * 0.05, 0, (random() - 0.5) * 0.05);
       quaternion.setFromEuler(euler);
-      tmpMatrix.compose(position.set(stalk.x, 0, stalk.z), quaternion, scale.set(stalk.radius, stalk.height, stalk.radius));
+      tmpMatrix.compose(position.set(stalk.x, stalk.y, stalk.z), quaternion, scale.set(stalk.radius, stalk.height, stalk.radius));
       stalksMesh.setMatrixAt(i, tmpMatrix);
       stalksMesh.setColorAt(i, stalk.color);
 
@@ -193,7 +205,7 @@ export function BambooGroup({ stalks, seed }: { stalks: Stalk[]; seed: number })
           const length = (stalk.radius > 0.14 ? 0.55 : 0.38) + random() * 0.3;
           position.set(
             stalk.x + Math.cos(twigAngle) * twigLength,
-            attachY + (random() - 0.5) * 0.25,
+            stalk.y + attachY + (random() - 0.5) * 0.25,
             stalk.z - Math.sin(twigAngle) * twigLength,
           );
           tmpMatrix.compose(position, quaternion, scale.set(length, length * (0.9 + random() * 0.4), length));

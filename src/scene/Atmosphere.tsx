@@ -2,9 +2,10 @@ import { useFrame } from "@react-three/fiber";
 import { useMemo } from "react";
 import * as THREE from "three";
 import { signals } from "../avatar/signals";
+import { HAZE, SKY_HIGH, SUN_DIRECTION } from "./environment";
 import { seededRandom, windUniforms } from "./wind";
 
-/** Gradient sky dome with a warm glow where the sun breaks through the canopy. */
+/** Gradient sky dome: hazy at the horizon, a low warm sun over the lake. */
 export function Sky() {
   const material = useMemo(
     () =>
@@ -12,7 +13,7 @@ export function Sky() {
         side: THREE.BackSide,
         depthWrite: false,
         fog: false,
-        uniforms: { uSun: { value: new THREE.Vector3(0.45, 0.35, -1).normalize() } },
+        uniforms: { uSun: { value: SUN_DIRECTION }, uHaze: { value: HAZE }, uHigh: { value: SKY_HIGH } },
         vertexShader: /* glsl */ `
           varying vec3 vDir;
           void main() {
@@ -20,16 +21,15 @@ export function Sky() {
             gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
           }`,
         fragmentShader: /* glsl */ `
-          uniform vec3 uSun;
+          uniform vec3 uSun, uHaze, uHigh;
           varying vec3 vDir;
           void main() {
             float y = vDir.y;
-            vec3 horizon = vec3(0.86, 0.9, 0.74);
-            vec3 high = vec3(0.42, 0.62, 0.52);
-            vec3 low = vec3(0.36, 0.5, 0.36);
-            vec3 color = y > 0.0 ? mix(horizon, high, smoothstep(0.0, 0.7, y)) : mix(horizon, low, smoothstep(0.0, 0.3, -y));
+            vec3 color = mix(uHaze, uHigh, smoothstep(0.0, 0.75, max(y, 0.0)));
             float sun = max(dot(vDir, uSun), 0.0);
-            color += vec3(1.0, 0.86, 0.6) * (pow(sun, 8.0) * 0.45 + pow(sun, 64.0) * 0.6);
+            color += vec3(1.0, 0.85, 0.6) * (pow(sun, 6.0) * 0.35 + pow(sun, 90.0) * 0.5);
+            // The sun's disc, bright enough to bloom softly.
+            color += vec3(1.0, 0.93, 0.8) * smoothstep(0.9993, 0.9997, sun) * 1.6;
             gl_FragColor = vec4(color, 1.0);
             #include <colorspace_fragment>
           }`,
@@ -38,21 +38,12 @@ export function Sky() {
   );
   return (
     <mesh material={material} renderOrder={-1}>
-      <sphereGeometry args={[90, 32, 16]} />
+      <sphereGeometry args={[400, 48, 24]} />
     </mesh>
   );
 }
 
-export function Ground() {
-  return (
-    <mesh rotation-x={-Math.PI / 2} position={[0, 0, -10]}>
-      <planeGeometry args={[120, 80]} />
-      <meshStandardMaterial color="#45602f" roughness={1} />
-    </mesh>
-  );
-}
-
-/** Soft beams of sunlight slanting through the bamboo, slowly breathing. */
+/** Soft beams of sunlight slanting through the side groves, slowly breathing. */
 export function LightShafts() {
   const material = useMemo(
     () =>
@@ -88,7 +79,7 @@ export function LightShafts() {
 
   const mesh = useMemo(() => {
     const random = seededRandom(3);
-    const count = 7;
+    const count = 6;
     const geometry = new THREE.PlaneGeometry(1, 1);
     const seeds = new Float32Array(count).map(() => random());
     geometry.setAttribute("aSeed", new THREE.InstancedBufferAttribute(seeds, 1));
@@ -96,8 +87,10 @@ export function LightShafts() {
     const matrix = new THREE.Matrix4();
     for (let i = 0; i < count; i++) {
       const width = 0.6 + random() * 1.4;
+      // Inside the groves on either side, not over the open view.
+      const side = i % 2 ? 1 : -1;
       matrix.compose(
-        new THREE.Vector3(-5 + i * 1.9 + random(), 5, -4 - random() * 9),
+        new THREE.Vector3(side * (3.5 + random() * 3.5), 5, -3 - random() * 6),
         new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, -0.42 + (random() - 0.5) * 0.1)),
         new THREE.Vector3(width, 13, 1),
       );

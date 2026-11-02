@@ -6,6 +6,8 @@ import { mouthOpenness, signals } from "./signals";
 
 export const CAMERA_POSITION = new THREE.Vector3(0, 1.5, 6);
 export const CAMERA_FOV = 35;
+/** The camera looks slightly down, over the edge of the hill, onto the lake. */
+export const CAMERA_PITCH = THREE.MathUtils.degToRad(7);
 const PANDA_Z = 1;
 
 // Landmarks in the portrait's UV space (0..1, origin bottom-left).
@@ -134,16 +136,18 @@ export function Panda({ src }: { src: string }) {
     const viewHeight = 2 * distance * Math.tan(THREE.MathUtils.degToRad(CAMERA_FOV / 2));
     const aspect = size.width / size.height;
     const viewWidth = viewHeight * aspect;
+    // The camera looks down a little, so the screen's center sits lower at the panda's depth.
+    const centerY = CAMERA_POSITION.y - distance * Math.tan(CAMERA_PITCH);
     let scale: number;
     let y: number;
     if (aspect < 0.85) {
       // Phones: fill the width (the sides fade out) and anchor on the face, above the controls.
       scale = Math.min(viewHeight * 0.8, viewWidth * 1.3);
-      y = CAMERA_POSITION.y + viewHeight * 0.08 - (HEAD_CENTER_Y - 0.5) * scale;
+      y = centerY + viewHeight * 0.08 - (HEAD_CENTER_Y - 0.5) * scale;
     } else {
       // High enough that the mouth stays visible above the subtitles.
-      scale = Math.min(viewHeight * 0.76, viewWidth * 0.95);
-      y = CAMERA_POSITION.y - viewHeight / 2 + scale / 2 + viewHeight * 0.2;
+      scale = Math.min(viewHeight * 0.7, viewWidth * 0.9);
+      y = centerY - viewHeight / 2 + scale / 2 + viewHeight * 0.2;
     }
     pandaHead.set(0, y + (HEAD_CENTER_Y - 0.5) * scale, PANDA_Z);
     return { scale, y };
@@ -207,11 +211,12 @@ export function Panda({ src }: { src: string }) {
   return (
     <group>
       {/* A soft light behind the head separates the character from the forest. */}
-      <mesh ref={halo} position={[0, pandaHead.y, PANDA_Z - 1.5]} scale={layout.scale * 1.7}>
+      <mesh ref={halo} position={[0, pandaHead.y, PANDA_Z - 1.5]} rotation-x={-CAMERA_PITCH} scale={layout.scale * 1.7}>
         <planeGeometry />
         <meshBasicMaterial map={haloTexture()} transparent depthWrite={false} blending={THREE.AdditiveBlending} opacity={0} toneMapped={false} />
       </mesh>
-      <mesh ref={mesh} position={[0, layout.y, PANDA_Z]} material={material} renderOrder={10}>
+      {/* Tilted to face the camera, so the portrait isn't foreshortened. */}
+      <mesh ref={mesh} position={[0, layout.y, PANDA_Z]} rotation-x={-CAMERA_PITCH} material={material} renderOrder={10}>
         <planeGeometry />
       </mesh>
     </group>
