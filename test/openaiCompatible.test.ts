@@ -13,7 +13,7 @@ import {
 // A tiny stand-in for DeepSeek/Qwen: streams chat-completion chunks, or fails on demand.
 let server: Server;
 let baseURL = "";
-let lastBody: { model: string; messages: { role: string; content: string }[] } | null = null;
+let lastBody: { model: string; messages: { role: string; content: string }[]; enable_thinking?: boolean } | null = null;
 
 beforeAll(async () => {
   server = createServer(async (req, res) => {
@@ -67,6 +67,13 @@ describe("OpenAI-compatible provider", () => {
     expect(lastBody?.messages.map((m) => m.role)).toEqual(["system", "user", "user"]);
     expect(lastBody?.messages[0].content).toContain("[OUT]");
     expect(lastBody?.messages.at(-1)?.content).toBe("What do pandas eat?");
+    expect(lastBody?.enable_thinking).toBeUndefined();
+  });
+
+  it("sends the preset's extra fields, such as Qwen's thinking switch", async () => {
+    const qwen = { ...config("good"), extraBody: { enable_thinking: false } };
+    await readVerdict(streamOpenAICompatible(qwen, request, new AbortController().signal));
+    expect(lastBody?.enable_thinking).toBe(false);
   });
 
   it("classifies bad keys as permanent and an empty balance as temporary", async () => {
@@ -88,16 +95,19 @@ describe("provider configuration", () => {
     expect(resolveLlmConfig({})).toBeNull();
   });
 
-  it("defaults to the DeepSeek preset", () => {
-    expect(resolveLlmConfig({ LLM_API_KEY: "k" })).toMatchObject({ name: "deepseek", baseURL: "https://api.deepseek.com", model: "deepseek-chat" });
+  it("defaults to Qwen Flash on the international endpoint, without thinking", () => {
+    expect(resolveLlmConfig({ LLM_API_KEY: "k" })).toMatchObject({
+      name: "qwen-intl",
+      baseURL: expect.stringContaining("dashscope-intl.aliyuncs.com"),
+      model: "qwen-flash",
+      extraBody: { enable_thinking: false },
+    });
   });
 
-  it("supports the Qwen presets and overrides", () => {
-    expect(resolveLlmConfig({ LLM_API_KEY: "k", LLM_PROVIDER: "qwen" })?.baseURL).toContain("dashscope.aliyuncs.com");
-    expect(resolveLlmConfig({ LLM_API_KEY: "k", LLM_PROVIDER: "qwen-intl", LLM_MODEL: "qwen-plus" })).toMatchObject({
-      baseURL: expect.stringContaining("dashscope-intl"),
-      model: "qwen-plus",
-    });
+  it("supports the mainland Qwen and DeepSeek presets, and overrides", () => {
+    expect(resolveLlmConfig({ LLM_API_KEY: "k", LLM_PROVIDER: "qwen" })?.baseURL).toContain("//dashscope.aliyuncs.com");
+    expect(resolveLlmConfig({ LLM_API_KEY: "k", LLM_PROVIDER: "deepseek" })).toMatchObject({ model: "deepseek-chat", extraBody: undefined });
+    expect(resolveLlmConfig({ LLM_API_KEY: "k", LLM_MODEL: "qwen-plus" })?.model).toBe("qwen-plus");
   });
 
   it("requires a base URL and model for unknown providers", () => {
@@ -106,7 +116,7 @@ describe("provider configuration", () => {
   });
 
   it("orders the auto chain: OpenAI-compatible, Claude, offline", () => {
-    expect(providerChain({ LLM_API_KEY: "k" }).chain.map((p) => p.name)).toEqual(["deepseek", "claude", "offline"]);
+    expect(providerChain({ LLM_API_KEY: "k" }).chain.map((p) => p.name)).toEqual(["qwen-intl", "claude", "offline"]);
     expect(providerChain({}).chain.map((p) => p.name)).toEqual(["claude", "offline"]);
     expect(providerChain({ PANDA_PROVIDER: "offline", LLM_API_KEY: "k" }).chain.map((p) => p.name)).toEqual(["offline"]);
   });

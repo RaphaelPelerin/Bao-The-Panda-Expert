@@ -3,7 +3,7 @@
 Bao is a panda avatar standing in a living bamboo forest. You ask questions out loud and Bao answers out loud, but only about pandas. Anything else gets a polite refusal.
 
 - **Voice in**: Web Speech API recognition, with live captions while you speak.
-- **Answers**: any OpenAI-compatible LLM (DeepSeek by default, Qwen preset included) or Claude, streamed. A server-side guard rejects off-topic questions before any text leaves the server.
+- **Answers**: Qwen Flash by default (fast and cheap, thinking off), or any OpenAI-compatible LLM, or Claude, streamed. A server-side guard rejects off-topic questions before any text leaves the server.
 - **Voice out**: browser text-to-speech that starts on the first sentence while the rest of the answer is still being written.
 - **Avatar**: five visible states (idle, listening, thinking, speaking, refusing) driven by one state machine and rendered in a real-time three.js scene: bamboo and leaves bending in shared wind gusts, light shafts, pollen, falling leaves.
 - **Always works**: no API key, no network or no microphone still gives a full demo. The server falls back to a built-in panda knowledge base, and a text field replaces the mic.
@@ -14,7 +14,7 @@ Requires Node 20 or newer and a Chromium-based browser (Chrome or Edge) for voic
 
 ```bash
 npm install
-cp .env.example .env    # optional: add LLM_API_KEY (DeepSeek or Qwen) or ANTHROPIC_API_KEY
+cp .env.example .env    # optional: add LLM_API_KEY (Alibaba Cloud Model Studio key for Qwen)
 npm run dev             # http://localhost:5173
 ```
 
@@ -24,14 +24,14 @@ Without a key, Bao answers from the offline knowledge base. The latency panel (p
 
 | Provider | `.env` | Notes |
 |---|---|---|
-| DeepSeek | `LLM_PROVIDER=deepseek`, `LLM_API_KEY=…` | Default. Model `deepseek-chat` (fast, non-reasoning mode). Very cheap, paid balance. |
-| Qwen (Alibaba Cloud Model Studio) | `LLM_PROVIDER=qwen` (mainland China) or `qwen-intl`, `LLM_API_KEY=…` | Model `qwen-flash`. New accounts usually get a free quota. |
+| Qwen (Alibaba Cloud Model Studio) | `LLM_API_KEY=…` (`LLM_PROVIDER=qwen-intl` is the default; use `qwen` for a mainland China account) | Default. Model `qwen-flash` with thinking turned off: short factual answers don't need reasoning, so it answers straight away. Cheap, and new accounts usually get a free quota. |
+| DeepSeek | `LLM_PROVIDER=deepseek`, `LLM_API_KEY=…` | Model `deepseek-chat` (non-reasoning mode). Paid balance. |
 | Any other OpenAI-compatible API (Kimi, GLM, Groq…) | `LLM_PROVIDER=<name>`, `LLM_BASE_URL=…`, `LLM_MODEL=…`, `LLM_API_KEY=…` | |
 | Claude | `ANTHROPIC_API_KEY=…` | Used when no `LLM_API_KEY` is set. Not available in mainland China. |
 
 Model names change often: check the provider's console and override with `LLM_MODEL` if needed. In `auto` mode, a provider with a bad key or no network is skipped, and an exhausted quota falls back to the next provider for that question. The panda never goes silent.
 
-For a demo in mainland China, use DeepSeek or Qwen. Also note that Chrome's speech recognition relies on Google servers, which are blocked there; the text input still works.
+Only the server calls the LLM, so the region to pick is where the server runs and where the account was created, not where visitors are. Also note that Chrome's speech recognition relies on Google servers, which are blocked there; the text input still works.
 
 | Command | What it does |
 |---|---|
@@ -59,7 +59,7 @@ MicLevel (Web Audio) ─ loudness ──────┼──▶ signals      PO
                                       │    (per frame)        │
 useConversation (orchestrator) ◀──────┘                       ▼
    │  dispatches events                                 provider stream ("[IN] Pandas eat…")
-   ▼                                                          │   DeepSeek/Qwen → Claude → offline
+   ▼                                                          │   Qwen Flash → Claude → offline
 reduce() state machine                                        ▼
    idle → listening → thinking → speaking → idle        readVerdict(): reads the tag first, fails closed
    │                                                          │
@@ -127,7 +127,7 @@ scripts/           eval-guard.ts (live verdict check)
 | Variable | Default | Meaning |
 |---|---|---|
 | `LLM_API_KEY` | none | Key for the OpenAI-compatible provider. Enables it. |
-| `LLM_PROVIDER` | `deepseek` | Preset: `deepseek`, `qwen`, `qwen-intl`, or any name with `LLM_BASE_URL` + `LLM_MODEL` |
+| `LLM_PROVIDER` | `qwen-intl` | Preset: `qwen-intl`, `qwen`, `deepseek`, or any name with `LLM_BASE_URL` + `LLM_MODEL` |
 | `LLM_BASE_URL`, `LLM_MODEL` | from the preset | Overrides |
 | `ANTHROPIC_API_KEY` | none | Claude credentials |
 | `PANDA_MODEL` | `claude-opus-5-5` | Claude model. Use `claude-haiku-5-5` for lower latency |

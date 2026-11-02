@@ -12,28 +12,42 @@ export interface LlmConfig {
   apiKey: string;
   baseURL: string;
   model: string;
+  extraBody?: Record<string, unknown>;
 }
 
-const PRESETS: Record<string, { baseURL: string; model: string }> = {
+interface Preset {
+  baseURL: string;
+  model: string;
+  /** Provider-specific request fields. */
+  extraBody?: Record<string, unknown>;
+}
+
+// Short factual answers need no reasoning, so Qwen's thinking mode is switched
+// off explicitly: it would only add latency.
+const QWEN_FAST = { enable_thinking: false };
+
+const PRESETS: Record<string, Preset> = {
+  // Alibaba Cloud Model Studio. The region is where the account was created;
+  // only the server calls it, so visitors' location does not matter.
+  "qwen-intl": { baseURL: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1", model: "qwen-flash", extraBody: QWEN_FAST },
+  qwen: { baseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1", model: "qwen-flash", extraBody: QWEN_FAST },
   deepseek: { baseURL: "https://api.deepseek.com", model: "deepseek-chat" },
-  // Alibaba Cloud Model Studio: the mainland China region, then the international one.
-  qwen: { baseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1", model: "qwen-flash" },
-  "qwen-intl": { baseURL: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1", model: "qwen-flash" },
 };
+const DEFAULT_PRESET = "qwen-intl";
 
 /** Reads the LLM_* variables. Returns null when no OpenAI-compatible provider is configured. */
 export function resolveLlmConfig(env: NodeJS.ProcessEnv): LlmConfig | null {
   const apiKey = env.LLM_API_KEY?.trim();
   if (!apiKey) return null;
 
-  const name = env.LLM_PROVIDER?.trim().toLowerCase() || "deepseek";
+  const name = env.LLM_PROVIDER?.trim().toLowerCase() || DEFAULT_PRESET;
   const preset = PRESETS[name];
   const baseURL = env.LLM_BASE_URL?.trim() || preset?.baseURL;
   const model = env.LLM_MODEL?.trim() || preset?.model;
   if (!baseURL || !model) {
     throw new Error(`LLM_PROVIDER "${name}" has no preset: set LLM_BASE_URL and LLM_MODEL (presets: ${Object.keys(PRESETS).join(", ")}).`);
   }
-  return { name, apiKey, baseURL, model };
+  return { name, apiKey, baseURL, model, extraBody: preset?.extraBody };
 }
 
 const clients = new Map<string, OpenAI>();
@@ -61,6 +75,7 @@ export async function* streamOpenAICompatible(config: LlmConfig, req: AskRequest
         ...req.history.map((turn) => ({ role: turn.role, content: turn.text })),
         { role: "user", content: req.question },
       ],
+      ...config.extraBody,
     },
     { signal },
   );
