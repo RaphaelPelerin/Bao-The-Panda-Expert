@@ -9,8 +9,7 @@ import {
 } from "../shared/protocol";
 import { readVerdict, type GuardedStream } from "./guard";
 import { REFUSALS } from "./prompt";
-import { isClaudeUnavailable, streamClaude } from "./providers/claude";
-import { streamOffline } from "./providers/offline";
+import { providerChain, type Provider } from "./providers";
 
 try {
   process.loadEnvFile();
@@ -18,13 +17,13 @@ try {
   // No .env file: rely on the real environment.
 }
 
-type ProviderMode = "auto" | "claude" | "offline";
-const MODE: ProviderMode = (["auto", "claude", "offline"] as const).find((m) => m === process.env.PANDA_PROVIDER) ?? "auto";
 const MAX_BODY_BYTES = 16_000;
+const { mode: MODE, chain: PROVIDERS } = providerChain(process.env);
+console.log(`[ask] providers (${MODE}): ${PROVIDERS.map((p) => p.name).join(" → ")}`);
 
-// In auto mode, the first credential or network failure switches the server to
-// offline answers for the rest of its life instead of failing every request.
-let claudeDisabled = MODE === "offline";
+// In auto mode, a provider with bad credentials or no network is skipped for
+// the rest of the server's life instead of failing every request.
+const disabled = new Set<Provider>();
 
 export async function handleAsk(req: IncomingMessage, res: ServerResponse): Promise<void> {
   if (req.method !== "POST") {
@@ -80,20 +79,27 @@ export async function handleAsk(req: IncomingMessage, res: ServerResponse): Prom
   }
 }
 
-async function openGuardedStream(
-  body: AskRequest,
-  signal: AbortSignal,
-): Promise<{ guarded: GuardedStream; provider: "claude" | "offline" }> {
-  if (!claudeDisabled) {
+/**
+ * Opens the first provider in the chain that answers. Failures only happen
+ * before the verdict (the first tokens), so falling through is invisible to the user.
+ */
+async function openGuardedStream(body: AskRequest, signal: AbortSignal): Promise<{ guarded: GuardedStream; provider: string }> {
+  const candidates = PROVIDERS.filter((p) => !disabled.has(p));
+  for (const [index, provider] of candidates.entries()) {
+    const isLast = index === candidates.length - 1;
     try {
-      return { guarded: await readVerdict(streamClaude(body, signal)), provider: "claude" };
+      return { guarded: await readVerdict(provider.stream(body, signal)), provider: provider.name };
     } catch (error) {
-      if (MODE !== "auto" || !isClaudeUnavailable(error)) throw error;
-      claudeDisabled = true;
-      console.warn("[ask] Claude unavailable, switching to offline answers:", error instanceof Error ? error.message : error);
+      const unavailable = provider.unavailability(error);
+      if (MODE !== "auto" || isLast || !unavailable || signal.aborted) throw error;
+      if (unavailable === "permanent") disabled.add(provider);
+      console.warn(
+        `[ask] ${provider.name} unavailable (${unavailable}), trying the next provider:`,
+        error instanceof Error ? error.message : error,
+      );
     }
   }
-  return { guarded: await readVerdict(streamOffline(body, signal)), provider: "offline" };
+  throw new Error("No provider available");
 }
 
 async function readBody(req: IncomingMessage): Promise<string> {

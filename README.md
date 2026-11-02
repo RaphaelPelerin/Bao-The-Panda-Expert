@@ -3,7 +3,7 @@
 Bao is a panda avatar standing in a living bamboo forest. You ask questions out loud and Bao answers out loud, but only about pandas. Anything else gets a polite refusal.
 
 - **Voice in**: Web Speech API recognition, with live captions while you speak.
-- **Answers**: Claude, streamed. A server-side guard rejects off-topic questions before any text leaves the server.
+- **Answers**: any OpenAI-compatible LLM (DeepSeek by default, Qwen preset included) or Claude, streamed. A server-side guard rejects off-topic questions before any text leaves the server.
 - **Voice out**: browser text-to-speech that starts on the first sentence while the rest of the answer is still being written.
 - **Avatar**: five visible states (idle, listening, thinking, speaking, refusing) driven by one state machine and rendered in a real-time three.js scene: bamboo and leaves bending in shared wind gusts, light shafts, pollen, falling leaves.
 - **Always works**: no API key, no network or no microphone still gives a full demo. The server falls back to a built-in panda knowledge base, and a text field replaces the mic.
@@ -14,16 +14,29 @@ Requires Node 20 or newer and a Chromium-based browser (Chrome or Edge) for voic
 
 ```bash
 npm install
-cp .env.example .env    # optional: add ANTHROPIC_API_KEY for real Claude answers
+cp .env.example .env    # optional: add LLM_API_KEY (DeepSeek or Qwen) or ANTHROPIC_API_KEY
 npm run dev             # http://localhost:5173
 ```
 
 Without a key, Bao answers from the offline knowledge base. The latency panel (press **D**) shows which provider answered.
 
+### Choosing a model
+
+| Provider | `.env` | Notes |
+|---|---|---|
+| DeepSeek | `LLM_PROVIDER=deepseek`, `LLM_API_KEY=…` | Default. Model `deepseek-chat` (fast, non-reasoning mode). Very cheap, paid balance. |
+| Qwen (Alibaba Cloud Model Studio) | `LLM_PROVIDER=qwen` (mainland China) or `qwen-intl`, `LLM_API_KEY=…` | Model `qwen-flash`. New accounts usually get a free quota. |
+| Any other OpenAI-compatible API (Kimi, GLM, Groq…) | `LLM_PROVIDER=<name>`, `LLM_BASE_URL=…`, `LLM_MODEL=…`, `LLM_API_KEY=…` | |
+| Claude | `ANTHROPIC_API_KEY=…` | Used when no `LLM_API_KEY` is set. Not available in mainland China. |
+
+Model names change often: check the provider's console and override with `LLM_MODEL` if needed. In `auto` mode, a provider with a bad key or no network is skipped, and an exhausted quota falls back to the next provider for that question. The panda never goes silent.
+
+For a demo in mainland China, use DeepSeek or Qwen. Also note that Chrome's speech recognition relies on Google servers, which are blocked there; the text input still works.
+
 | Command | What it does |
 |---|---|
 | `npm run dev` | Front end and `/api/ask` in one Vite process, with hot reload for both |
-| `npm test` | Unit tests: topic guard, offline expert, state machine, sentence splitter, request validation |
+| `npm test` | Unit tests: topic guard, providers (against a mock OpenAI-compatible server), offline expert, state machine, sentence splitter, request validation |
 | `npm run eval` | Runs 17 in-scope, out-of-scope and adversarial questions against the live model and checks every verdict (needs a key) |
 | `npm run build && npm start` | Production build served by a small Node server on port 8787 |
 
@@ -46,7 +59,7 @@ MicLevel (Web Audio) ─ loudness ──────┼──▶ signals      PO
                                       │    (per frame)        │
 useConversation (orchestrator) ◀──────┘                       ▼
    │  dispatches events                                 provider stream ("[IN] Pandas eat…")
-   ▼                                                          │   Claude, or offline knowledge base
+   ▼                                                          │   DeepSeek/Qwen → Claude → offline
 reduce() state machine                                        ▼
    idle → listening → thinking → speaking → idle        readVerdict(): reads the tag first, fails closed
    │                                                          │
@@ -66,7 +79,7 @@ React UI (captions, mic, status)      three.js scene reads `signals` every frame
 
 Off-topic questions therefore never reach the user as text, and the refusal wording can't drift. Mixed questions get the panda part answered plus one sentence about scope. The prompt also covers the classic traps: prompt injection, role-play, and "pandas" the Python library. More in [DISCUSSION.md](DISCUSSION.md#q5-topic-restriction).
 
-**Streaming end to end.** Claude streams to the server, the server streams to the browser over server-sent events (SSE), and the browser splits the text into sentences and queues them for speech. Bao starts talking after the first sentence instead of after the whole answer. The latency panel shows each step.
+**Streaming end to end.** The model streams to the server, the server streams to the browser over server-sent events (SSE), and the browser splits the text into sentences and queues them for speech. Bao starts talking after the first sentence instead of after the whole answer. The latency panel shows each step.
 
 **The voice drives the scene, through a mutable `signals` object, not React state.**
 - Microphone loudness makes the wind pick up and the pollen glow while you talk.
@@ -88,7 +101,7 @@ The plan is to replace this with AI-generated video clips per state; the transit
 
 | If this is missing | What happens |
 |---|---|
-| API key or network | Offline knowledge base, same streaming contract |
+| API key, quota or network | Next provider in the chain, ending with the offline knowledge base (same streaming contract) |
 | `speechSynthesis` | Timed silent playback, so the states still flow |
 | Speech recognition | Text input |
 | Microphone permission | Clear message, then the app recovers by itself |
@@ -96,7 +109,8 @@ The plan is to replace this with AI-generated video clips per state; the transit
 ### Project layout
 
 ```
-server/            ask.ts (HTTP + SSE), guard.ts, prompt.ts, providers/{claude,offline,knowledge}.ts, index.ts
+server/            ask.ts (HTTP + SSE), guard.ts, prompt.ts, index.ts
+                   providers/{index,openaiCompatible,claude,offline,knowledge}.ts
 shared/protocol.ts request and event types shared by client and server
 src/state/         machine.ts, useConversation.ts, metrics.ts
 src/voice/         stt.ts, tts.ts, micLevel.ts
@@ -112,12 +126,15 @@ scripts/           eval-guard.ts (live verdict check)
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | none | Claude credentials. Without them, Bao uses the offline knowledge base. |
-| `PANDA_PROVIDER` | `auto` | `auto` (Claude, falling back to offline on auth or network errors), `claude`, or `offline` |
-| `PANDA_MODEL` | `claude-opus-5-5` | Use `claude-haiku-5-5` for lower latency |
+| `LLM_API_KEY` | none | Key for the OpenAI-compatible provider. Enables it. |
+| `LLM_PROVIDER` | `deepseek` | Preset: `deepseek`, `qwen`, `qwen-intl`, or any name with `LLM_BASE_URL` + `LLM_MODEL` |
+| `LLM_BASE_URL`, `LLM_MODEL` | from the preset | Overrides |
+| `ANTHROPIC_API_KEY` | none | Claude credentials |
+| `PANDA_MODEL` | `claude-opus-5-5` | Claude model. Use `claude-haiku-5-5` for lower latency |
+| `PANDA_PROVIDER` | `auto` | `auto` (OpenAI-compatible, then Claude, then offline), `openai`, `claude`, or `offline` |
 | `PORT` | `8787` | Port for `npm start` |
 
-The Claude request uses low effort and short answers (two to four spoken sentences). It also enables server-side refusal fallback: if the model's safety system declines, the request is retried on another model inside the same call.
+Answers are kept short (two to four spoken sentences). OpenAI-compatible requests use a low temperature so the topic tag stays reliable. The Claude request uses low effort. It also enables server-side refusal fallback: if the model's safety system declines, the request is retried on another model inside the same call.
 
 ## Known limits
 

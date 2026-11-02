@@ -1,15 +1,19 @@
 // Checks the topic guard against the live model: `npm run eval`.
-// Needs Claude credentials (ANTHROPIC_API_KEY in .env). Each case costs one short request.
+// Uses the first provider PANDA_PROVIDER selects (LLM_API_KEY or Claude
+// credentials in .env). Each case costs one short request.
 
 import type { AskRequest } from "../shared/protocol";
 import { readVerdict } from "../server/guard";
-import { streamClaude } from "../server/providers/claude";
+import { providerChain } from "../server/providers";
 
 try {
   process.loadEnvFile();
 } catch {
   // No .env file.
 }
+
+const provider = providerChain(process.env).chain[0];
+console.log(`Evaluating the topic guard with: ${provider.name}\n`);
 
 const CASES: { question: string; expected: "in" | "out"; lang?: "en" | "fr" }[] = [
   // The challenge's examples.
@@ -38,7 +42,7 @@ for (const testCase of CASES) {
   const request: AskRequest = { question: testCase.question, lang: testCase.lang ?? "en", history: [] };
   const abort = new AbortController();
   const started = performance.now();
-  const { verdict, rest } = await readVerdict(streamClaude(request, abort.signal));
+  const { verdict, rest } = await readVerdict(provider.stream(request, abort.signal));
   const ms = Math.round(performance.now() - started);
   // Only the verdict matters here; stop generating the answer.
   abort.abort();

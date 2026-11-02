@@ -17,7 +17,7 @@ export interface AskRequest {
 /** Server-sent events, one JSON object per `data:` line. */
 export type AskEvent =
   /** Sent once the topic guard has decided. `inScope: false` means `text` deltas carry the refusal. */
-  | { type: "verdict"; inScope: boolean; provider: "claude" | "offline" }
+  | { type: "verdict"; inScope: boolean; provider: string }
   | { type: "delta"; text: string }
   | { type: "done" }
   | { type: "error"; message: string };
