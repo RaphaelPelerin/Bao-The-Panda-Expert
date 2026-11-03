@@ -61,7 +61,7 @@ export function Scene() {
       <LightShafts />
       <Motes focus={pandaHead} />
       <FallingLeaves />
-      <Panda src="/assets/panda.jpg" />
+      <Panda />
 
       <EffectComposer multisampling={4}>
         {/* High threshold: only sun glints and pollen glow. A lower one blooms the pale

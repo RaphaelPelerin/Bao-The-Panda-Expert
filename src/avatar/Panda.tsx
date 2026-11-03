@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { cutOutBackground } from "./cutout";
 import { mouthOpenness, signals } from "./signals";
+import { VideoLoop } from "./videoLoop";
 
 export const CAMERA_POSITION = new THREE.Vector3(0, 1.5, 6);
 export const CAMERA_FOV = 35;
@@ -10,11 +11,37 @@ export const CAMERA_FOV = 35;
 export const CAMERA_PITCH = THREE.MathUtils.degToRad(7);
 const PANDA_Z = 1;
 
-// Landmarks in the portrait's UV space (0..1, origin bottom-left).
-const NECK = new THREE.Vector2(0.5, 0.3);
-const MOUTH = new THREE.Vector2(0.483, 0.405);
-const UPPER_LIP_Y = 0.442;
-const HEAD_CENTER_Y = 0.6;
+/** Where the face sits in a source, in UV space (0..1, origin bottom-left). */
+interface Landmarks {
+  neck: THREE.Vector2;
+  mouth: THREE.Vector2;
+  upperLip: number;
+  headCenterY: number;
+}
+
+/** The AI-generated idle clip on a blue screen: breathes and blinks by itself. */
+const VIDEO = {
+  url: "/videos/bao-idle.mp4",
+  // The model re-grades the colors after the very first frames; loop past them.
+  loopStart: 0.3,
+  landmarks: {
+    neck: new THREE.Vector2(0.5, 0.27),
+    mouth: new THREE.Vector2(0.5, 0.325),
+    upperLip: 0.35,
+    headCenterY: 0.53,
+  } satisfies Landmarks,
+};
+
+/** Fallback when the clip cannot play: the original portrait, cut out on the CPU. */
+const IMAGE = {
+  url: "/assets/panda.jpg",
+  landmarks: {
+    neck: new THREE.Vector2(0.5, 0.3),
+    mouth: new THREE.Vector2(0.483, 0.405),
+    upperLip: 0.442,
+    headCenterY: 0.6,
+  } satisfies Landmarks,
+};
 
 const vertexShader = /* glsl */ `
   uniform float uBreath;
@@ -31,6 +58,10 @@ const vertexShader = /* glsl */ `
 
 const fragmentShader = /* glsl */ `
   uniform sampler2D uMap;
+  uniform sampler2D uMapNext;
+  uniform float uMix;
+  uniform float uChroma;
+  uniform float uJaw;
   uniform float uMouth;
   uniform float uSpeak;
   uniform float uTilt;
@@ -46,6 +77,19 @@ const fragmentShader = /* glsl */ `
     return vec2(c * p.x - s * p.y, s * p.x + c * p.y);
   }
 
+  // One avatar pixel: blends the two looping clips, and for video keys out
+  // the blue screen and removes the blue that bleeds into the fur's edges.
+  vec4 avatar(vec2 uv) {
+    vec4 color = texture2D(uMap, uv);
+    if (uMix > 0.0) color = mix(color, texture2D(uMapNext, uv), uMix);
+    if (uChroma > 0.5) {
+      float key = color.b - max(color.r, color.g);
+      color.a = 1.0 - smoothstep(0.06, 0.22, key);
+      color.b = min(color.b, max(color.r, color.g) * 1.04 + 0.01);
+    }
+    return color;
+  }
+
   void main() {
     vec2 uv = vUv;
 
@@ -57,14 +101,14 @@ const fragmentShader = /* glsl */ `
     // Jaw: pull the area under the upper lip down (open) or up (closed).
     vec2 m = (uv - uMouthCenter) / vec2(0.12, 0.085);
     float jawArea = smoothstep(1.0, 0.25, length(m)) * smoothstep(uUpperLip + 0.01, uUpperLip - 0.012, uv.y);
-    uv.y += uSpeak * (uMouth * 0.034 - 0.007) * jawArea;
+    uv.y += uSpeak * uJaw * (uMouth * 0.034 - 0.007) * jawArea;
 
     if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) discard;
-    vec4 color = texture2D(uMap, uv);
+    vec4 color = avatar(uv);
     if (color.a < 0.004) discard;
 
     // Warm rim light where the silhouette faces the sun (upper right).
-    float outside = 1.0 - texture2D(uMap, uv + vec2(0.007, 0.006)).a;
+    float outside = 1.0 - avatar(uv + vec2(0.007, 0.006)).a;
     float rim = color.a * outside;
     color.rgb += vec3(1.0, 0.82, 0.55) * rim * 0.55;
     // Settle the studio-lit portrait into the green, hazy forest light.
@@ -79,27 +123,52 @@ const fragmentShader = /* glsl */ `
 /** Shared with the motes, which orbit the head while the panda thinks. */
 export const pandaHead = new THREE.Vector3(0, 1.6, PANDA_Z);
 
-export function Panda({ src }: { src: string }) {
-  const [texture, setTexture] = useState<THREE.Texture | null>(null);
+type Source = { kind: "video"; loop: VideoLoop } | { kind: "image"; texture: THREE.Texture };
+
+export function Panda() {
+  const [source, setSource] = useState<Source | null>(null);
   const mesh = useRef<THREE.Mesh>(null);
   const halo = useRef<THREE.Mesh>(null);
   const { size } = useThree();
 
+  // The video shows as soon as it is loaded: paused on the loop's first frame,
+  // then animated once playback starts (on the first tap if autoplay is blocked).
+  // The still portrait is only used when the clip cannot load at all.
   useEffect(() => {
     let cancelled = false;
-    cutOutBackground(src)
-      .then((canvas) => {
+    const loop = new VideoLoop(VIDEO.url, VIDEO.loopStart);
+    const retryOnTap = () => {
+      window.removeEventListener("pointerdown", retryOnTap);
+      loop.start().catch((error) => console.warn("Avatar video still blocked:", error));
+    };
+
+    loop.loaded
+      .then(() => {
         if (cancelled) return;
-        const tex = new THREE.CanvasTexture(canvas);
-        tex.colorSpace = THREE.SRGBColorSpace;
-        tex.anisotropy = 8;
-        setTexture(tex);
+        setSource({ kind: "video", loop });
+        loop.start().catch((error: unknown) => {
+          if (error instanceof DOMException && error.name === "NotAllowedError") window.addEventListener("pointerdown", retryOnTap);
+          else console.warn("Avatar video could not start:", error);
+        });
       })
-      .catch((error) => console.error("Could not prepare the panda image", error));
+      .catch(async (error) => {
+        console.warn("Avatar video unavailable, using the still portrait:", error);
+        const canvas = await cutOutBackground(IMAGE.url);
+        if (cancelled) return;
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.anisotropy = 8;
+        setSource({ kind: "image", texture });
+      });
+
     return () => {
       cancelled = true;
+      window.removeEventListener("pointerdown", retryOnTap);
+      loop.dispose();
     };
-  }, [src]);
+  }, []);
+
+  const landmarks = source?.kind === "image" ? IMAGE.landmarks : VIDEO.landmarks;
 
   const material = useMemo(
     () =>
@@ -108,6 +177,10 @@ export function Panda({ src }: { src: string }) {
         depthWrite: false,
         uniforms: {
           uMap: { value: null },
+          uMapNext: { value: null },
+          uMix: { value: 0 },
+          uChroma: { value: 0 },
+          uJaw: { value: 1 },
           uMouth: { value: 0 },
           uSpeak: { value: 0 },
           uTilt: { value: 0 },
@@ -115,9 +188,9 @@ export function Panda({ src }: { src: string }) {
           uBreath: { value: 0 },
           uSway: { value: 0 },
           uFade: { value: 0 },
-          uNeck: { value: NECK },
-          uMouthCenter: { value: MOUTH },
-          uUpperLip: { value: UPPER_LIP_Y },
+          uNeck: { value: VIDEO.landmarks.neck },
+          uMouthCenter: { value: VIDEO.landmarks.mouth },
+          uUpperLip: { value: VIDEO.landmarks.upperLip },
         },
         vertexShader,
         fragmentShader,
@@ -126,8 +199,21 @@ export function Panda({ src }: { src: string }) {
   );
 
   useEffect(() => {
-    material.uniforms.uMap.value = texture;
-  }, [material, texture]);
+    const u = material.uniforms;
+    u.uNeck.value = landmarks.neck;
+    u.uMouthCenter.value = landmarks.mouth;
+    u.uUpperLip.value = landmarks.upperLip;
+    if (source?.kind === "image") {
+      u.uMap.value = source.texture;
+      u.uMix.value = 0;
+      u.uChroma.value = 0;
+      u.uJaw.value = 1;
+    } else if (source?.kind === "video") {
+      u.uChroma.value = 1;
+      // The clip's mouth is closed: a smaller jaw warp reads as talking, a big one as stretching.
+      u.uJaw.value = 0.55;
+    }
+  }, [material, source, landmarks]);
 
   // Fit the portrait to the screen: the faded shoulders sit behind the controls,
   // the face stays clear above them.
@@ -138,20 +224,22 @@ export function Panda({ src }: { src: string }) {
     const viewWidth = viewHeight * aspect;
     // The camera looks down a little, so the screen's center sits lower at the panda's depth.
     const centerY = CAMERA_POSITION.y - distance * Math.tan(CAMERA_PITCH);
+    // Place the head at a fixed spot on screen, whatever the source's framing.
     let scale: number;
-    let y: number;
+    let headY: number;
     if (aspect < 0.85) {
-      // Phones: fill the width (the sides fade out) and anchor on the face, above the controls.
+      // Phones: fill the width (the sides fade out), face above the controls.
       scale = Math.min(viewHeight * 0.8, viewWidth * 1.3);
-      y = centerY + viewHeight * 0.08 - (HEAD_CENTER_Y - 0.5) * scale;
+      headY = centerY + viewHeight * 0.08;
     } else {
       // High enough that the mouth stays visible above the subtitles.
       scale = Math.min(viewHeight * 0.7, viewWidth * 0.9);
-      y = centerY - viewHeight / 2 + scale / 2 + viewHeight * 0.2;
+      headY = centerY - viewHeight / 2 + scale * 0.6 + viewHeight * 0.2;
     }
-    pandaHead.set(0, y + (HEAD_CENTER_Y - 0.5) * scale, PANDA_Z);
+    const y = headY - (landmarks.headCenterY - 0.5) * scale;
+    pandaHead.set(0, headY, PANDA_Z);
     return { scale, y };
-  }, [size.width, size.height]);
+  }, [size.width, size.height, landmarks]);
 
   const motion = useRef({ tilt: 0, nod: 0, mouth: 0, speak: 0, lean: 1, speakingSince: 0, wasSpeaking: false });
 
@@ -190,13 +278,21 @@ export function Panda({ src }: { src: string }) {
     m.mouth = ease(m.mouth, mouthOpenness(now), 22);
     m.nod = ease(m.nod, signals.speaking ? Math.sin(t * 4.3) * 0.004 * (0.4 + m.mouth) : 0, 8);
 
+    if (source?.kind === "video") {
+      const frame = source.loop.update();
+      u.uMap.value = frame.from;
+      u.uMapNext.value = frame.to;
+      u.uMix.value = frame.mix;
+    }
+
     u.uTilt.value = m.tilt;
     u.uMouth.value = m.mouth;
     u.uSpeak.value = m.speak;
     u.uNod.value = m.nod;
-    u.uBreath.value = Math.sin(t * 1.55) * 0.0045;
+    // The video already breathes; the still portrait needs a little help.
+    u.uBreath.value = source?.kind === "image" ? Math.sin(t * 1.55) * 0.0045 : 0;
     u.uSway.value = Math.sin(t * 0.62) * 0.004;
-    if (texture) u.uFade.value = ease(u.uFade.value, 1, 2);
+    if (source) u.uFade.value = ease(u.uFade.value, 1, 2);
 
     if (mesh.current) {
       mesh.current.scale.setScalar(layout.scale * m.lean);
