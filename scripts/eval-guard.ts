@@ -1,6 +1,6 @@
 // Checks the topic guard against the live model: `npm run eval`.
-// Uses the first provider PANDA_PROVIDER selects (LLM_API_KEY or Claude
-// credentials in .env). Each case costs one short request.
+// Uses the first provider PANDA_PROVIDER selects (Qwen Flash with
+// LLM_API_KEY in .env). Each case uses one short request of the free quota.
 
 import type { AskRequest } from "../shared/protocol";
 import { readVerdict } from "../server/guard";

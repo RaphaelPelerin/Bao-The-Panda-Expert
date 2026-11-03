@@ -1,5 +1,6 @@
 node_modules
 dist
 .env
+.qwen-usage.json
 *.log
 raw/*.mp4

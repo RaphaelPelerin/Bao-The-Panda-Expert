@@ -1,7 +1,7 @@
 import type { Lang, Turn } from "../../shared/protocol";
 import { REFUSALS } from "../prompt";
 
-// Offline fallback: a small rule-based panda expert used when Claude is not
+// Offline fallback: a small rule-based panda expert used when Qwen is not
 // configured or unreachable. It keeps the demo working and is fully testable.
 
 interface Fact {

@@ -9,6 +9,8 @@ export interface GuardedStream {
 }
 
 const LONGEST_TAG = Math.max(TAG_IN.length, TAG_OUT.length);
+/** Whitespace, bullets and quotes a model may put before the tag. */
+const LEADING_NOISE = /^[\s\-*•>"'`]+/;
 
 /**
  * Reads the leading [IN]/[OUT] tag from a model text stream before anything is
@@ -24,7 +26,8 @@ export async function readVerdict(source: AsyncIterable<string>): Promise<Guarde
     if (next.done) break;
     head += next.value;
 
-    const trimmed = head.trimStart();
+    // Some models copy the bullet the prompt lists the tags with ("- [IN] …").
+    const trimmed = head.replace(LEADING_NOISE, "");
     if (trimmed.startsWith(TAG_OUT)) {
       await iterator.return?.();
       return { verdict: "out", rest: empty() };
@@ -37,6 +40,7 @@ export async function readVerdict(source: AsyncIterable<string>): Promise<Guarde
   }
 
   await iterator.return?.();
+  console.warn(`[guard] reply without a tag, treated as out of scope: ${JSON.stringify(head.slice(0, 80))}`);
   return { verdict: "out", rest: empty() };
 }
 

@@ -1,7 +1,7 @@
 import type { AskRequest } from "../../shared/protocol";
-import { isClaudeUnavailable, streamClaude } from "./claude";
+import { DailyLimit, DailyLimitReached } from "../dailyLimit";
 import { streamOffline } from "./offline";
-import { openAICompatibleUnavailability, resolveLlmConfig, streamOpenAICompatible, type Unavailability } from "./openaiCompatible";
+import { qwenUnavailability, resolveQwenConfig, streamQwen, type Unavailability } from "./qwen";
 
 export interface Provider {
   /** Shown in the latency panel and the server log. */
@@ -11,8 +11,12 @@ export interface Provider {
   unavailability(error: unknown): Unavailability;
 }
 
-export type ProviderMode = "auto" | "openai" | "claude" | "offline";
-const MODES: readonly ProviderMode[] = ["auto", "openai", "claude", "offline"];
+export type ProviderMode = "auto" | "qwen" | "offline";
+const MODES: readonly ProviderMode[] = ["auto", "qwen", "offline"];
+
+/** Questions per day sent to Qwen when QWEN_DAILY_LIMIT is not set. */
+export const DEFAULT_DAILY_LIMIT = 100;
+const USAGE_FILE = ".qwen-usage.json";
 
 export const offlineProvider: Provider = {
   name: "offline",
@@ -20,41 +24,46 @@ export const offlineProvider: Provider = {
   unavailability: () => null,
 };
 
-function openAICompatibleProvider(env: NodeJS.ProcessEnv): Provider | null {
-  const config = resolveLlmConfig(env);
+function qwenProvider(env: NodeJS.ProcessEnv, usageFile: string): Provider | null {
+  const config = resolveQwenConfig(env);
   if (!config) return null;
+  const limit = new DailyLimit(dailyLimit(env), usageFile);
   return {
     name: config.name,
-    stream: (req, signal) => streamOpenAICompatible(config, req, signal),
-    unavailability: openAICompatibleUnavailability,
+    async *stream(req, signal) {
+      if (!limit.take()) throw new DailyLimitReached(limit.max);
+      yield* streamQwen(config, req, signal);
+    },
+    // Today's limit only skips Qwen until the date changes.
+    unavailability: (error) => (error instanceof DailyLimitReached ? "temporary" : qwenUnavailability(error)),
   };
 }
 
-const claudeProvider: Provider = {
-  name: "claude",
-  stream: streamClaude,
-  unavailability: (error) => (isClaudeUnavailable(error) ? "permanent" : null),
-};
+function dailyLimit(env: NodeJS.ProcessEnv): number {
+  const raw = env.QWEN_DAILY_LIMIT?.trim();
+  if (!raw) return DEFAULT_DAILY_LIMIT;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 0) throw new Error(`QWEN_DAILY_LIMIT must be a whole number (0 for no limit), not "${raw}".`);
+  return value;
+}
 
 /**
  * Providers to try in order for PANDA_PROVIDER:
- * - auto: the OpenAI-compatible provider when LLM_API_KEY is set, then Claude, then offline
- * - openai / claude: only that provider (errors surface instead of falling back)
+ * - auto: Qwen Flash when LLM_API_KEY is set, then the offline knowledge base
+ * - qwen: only Qwen (errors surface instead of falling back)
  * - offline: the built-in knowledge base only
  */
-export function providerChain(env: NodeJS.ProcessEnv): { mode: ProviderMode; chain: Provider[] } {
+export function providerChain(env: NodeJS.ProcessEnv, usageFile = USAGE_FILE): { mode: ProviderMode; chain: Provider[] } {
   const mode = MODES.find((m) => m === env.PANDA_PROVIDER) ?? "auto";
-  const compatible = openAICompatibleProvider(env);
+  const qwen = qwenProvider(env, usageFile);
 
   switch (mode) {
     case "offline":
       return { mode, chain: [offlineProvider] };
-    case "claude":
-      return { mode, chain: [claudeProvider] };
-    case "openai":
-      if (!compatible) throw new Error("PANDA_PROVIDER=openai needs LLM_API_KEY.");
-      return { mode, chain: [compatible] };
+    case "qwen":
+      if (!qwen) throw new Error("PANDA_PROVIDER=qwen needs LLM_API_KEY.");
+      return { mode, chain: [qwen] };
     case "auto":
-      return { mode, chain: [...(compatible ? [compatible] : []), claudeProvider, offlineProvider] };
+      return { mode, chain: [...(qwen ? [qwen] : []), offlineProvider] };
   }
 }

@@ -5,7 +5,7 @@ import { answerOffline } from "./knowledge";
 const WORD_DELAY_MS = 18;
 
 /**
- * Same contract as streamClaude: yields tagged text in small chunks, so the
+ * Same contract as streamQwen: yields tagged text in small chunks, so the
  * guard, the SSE route and the client streaming path are exercised identically.
  */
 export async function* streamOffline(req: AskRequest, signal: AbortSignal): AsyncGenerator<string> {

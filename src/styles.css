@@ -27,7 +27,7 @@ body,
 }
 
 body {
-  /* Shown while the 3D scene loads: the same hazy forest light. */
+  /* Shown while the panda loads: the same light as the default backdrop. */
   background: radial-gradient(ellipse at 55% 30%, #e3ead0, #9cbb93 50%, #4d6c45);
   color: var(--ink);
   font-family: var(--font-body);
@@ -68,6 +68,10 @@ button {
 .scene-loading {
   position: absolute;
   inset: 0;
+  /* Static backdrop: drop any picture at public/background.jpg; the gradient shows until then. */
+  background:
+    url("/background.jpg") center / cover no-repeat,
+    radial-gradient(ellipse at 55% 30%, #e3ead0, #9cbb93 50%, #4d6c45);
 }
 
 .topbar {

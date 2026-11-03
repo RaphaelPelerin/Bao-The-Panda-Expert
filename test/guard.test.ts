@@ -24,6 +24,13 @@ describe("readVerdict", () => {
     expect(await collect(result.rest)).toBe("Hello");
   });
 
+  it("accepts a tag after a bullet or quote the model copied from the prompt", async () => {
+    const result = await readVerdict(chunks("- [IN", "] Bamboo!"));
+    expect(result.verdict).toBe("in");
+    expect(await collect(result.rest)).toBe("Bamboo!");
+    expect((await readVerdict(chunks('"[OUT]"'))).verdict).toBe("out");
+  });
+
   it("drops everything after [OUT]", async () => {
     const result = await readVerdict(chunks("[OUT]", " Actually the weather is sunny."));
     expect(result.verdict).toBe("out");

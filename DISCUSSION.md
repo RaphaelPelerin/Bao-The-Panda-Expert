@@ -27,7 +27,7 @@ In all three cases audio becomes the master clock, and the avatar reads its posi
 |---|---|---|
 | End-of-speech detection | 0.5–1.5 s | Browser STT waits for silence. Use a streaming STT (Deepgram, AssemblyAI, Whisper streaming) with a tuned endpointing threshold (~400 ms), or a voice activity detector (VAD) in the client. |
 | Speech-to-text finalization | 0.2–0.6 s | Use the streaming partials and start the request on a confident partial, then confirm or cancel. |
-| Model time-to-first-token | 0.3–1.5 s | A smaller model (`PANDA_MODEL=claude-haiku-5-5`), low effort, short prompt, prompt caching once the prompt is long enough, and a warm keep-alive connection. |
+| Model time-to-first-token | 0.8–1.7 s | A fast model with thinking off (Qwen Flash, as today), a short prompt, prompt caching once the prompt is long enough, and a warm keep-alive connection. |
 | Waiting for the full answer | 1–3 s | Already solved here: sentence streaming into TTS. |
 | TTS time-to-first-audio | 0.2–1 s | A streaming TTS (audio chunks over WebSocket), with the first sentence kept short. The chunker already cuts long first sentences at a comma. |
 
@@ -37,7 +37,7 @@ Perceived latency matters as much as real latency. The panda switches to "thinki
 
 The current version already speaks before the model finishes:
 
-1. The server streams Claude's text deltas over SSE (`server/ask.ts`). The only buffering is the few characters of the `[IN]`/`[OUT]` tag.
+1. The server streams Qwen's text deltas over SSE (`server/ask.ts`). The only buffering is the few characters of the `[IN]`/`[OUT]` tag.
 2. `SentenceChunker` (`src/llm/sentences.ts`) emits each complete sentence, and long ones at a comma.
 3. `SpeechOutput` (`src/voice/tts.ts`) keeps a queue: sentence 1 plays while sentences 2 and 3 are still being generated. `finish()` marks the end so the state machine leaves "speaking" only after the last sentence.
 
@@ -47,7 +47,7 @@ With an audio TTS API, the next step is to stream the TTS too: send each sentenc
 
 **Today**: pressing the mic (or Space) while Bao is thinking or talking calls `interrupt()`:
 
-- the `fetch` is aborted, and the server sees the closed connection and aborts the Claude stream, so tokens stop being generated and billed;
+- the `fetch` is aborted, and the server sees the closed connection and aborts the Qwen stream, so tokens stop being generated and billed;
 - the speech queue is reset;
 - recognition restarts.
 

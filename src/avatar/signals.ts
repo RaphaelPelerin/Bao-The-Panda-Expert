@@ -1,4 +1,5 @@
 import type { Phase } from "../state/machine";
+import { lipSync } from "./lipsync";
 
 /**
  * Per-frame values shared between the voice layer and the 3D scene. Kept in a
@@ -11,8 +12,6 @@ export const signals = {
   micLevel: 0,
   /** True while the panda's voice is audible. */
   speaking: false,
-  /** performance.now() of the last spoken word boundary, drives mouth pulses. */
-  wordAt: 0,
   /** Whether the last answer was a polite refusal. */
   refusing: false,
   /** Measured frame rate and current render scale, shown in the debug panel. */
@@ -20,14 +19,8 @@ export const signals = {
   renderScale: 1,
 };
 
-/**
- * How open the mouth should be right now, 0..1. Browser TTS gives no audio
- * samples, so this combines word-boundary events with a syllable-rate wobble.
- */
+/** How open the mouth should be right now, 0..1, following the words being spoken. */
 export function mouthOpenness(now: number): number {
   if (!signals.speaking) return 0;
-  const sinceWord = (now - signals.wordAt) / 1000;
-  const wordEnergy = Math.exp(-sinceWord * 3.5);
-  const syllables = Math.abs(Math.sin(now * 0.0185)) * 0.7 + Math.abs(Math.sin(now * 0.031 + 1.3)) * 0.3;
-  return Math.min(1, (0.35 + 0.65 * wordEnergy) * syllables);
+  return lipSync.sample(now).open;
 }

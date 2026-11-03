@@ -1,4 +1,5 @@
 import type { Lang } from "../../shared/protocol";
+import { lipSync } from "../avatar/lipsync";
 import { signals } from "../avatar/signals";
 
 export interface TtsHandlers {
@@ -63,6 +64,7 @@ export class SpeechOutput {
     this.current = null;
     this.synth?.cancel();
     signals.speaking = false;
+    lipSync.stop();
   }
 
   private pump(): void {
@@ -73,6 +75,7 @@ export class SpeechOutput {
         this.started = false;
         this.finished = false;
         signals.speaking = false;
+        lipSync.stop();
         this.handlers.onDone();
       }
       return;
@@ -90,7 +93,9 @@ export class SpeechOutput {
     if (!this.synth) {
       this.markStarted();
       // Roughly the pace of speech: about 170 words a minute.
-      setTimeout(done, Math.max(800, next.split(/\s+/).length * 350));
+      const duration = Math.max(800, next.split(/\s+/).length * 350);
+      lipSync.start(next, this.lang, 1, duration);
+      setTimeout(done, duration);
       return;
     }
 
@@ -102,13 +107,15 @@ export class SpeechOutput {
     utterance.onstart = () => {
       if (generation !== this.generation) return;
       this.markStarted();
-      signals.wordAt = performance.now();
+      lipSync.start(next, this.lang, utterance.rate);
     };
-    utterance.onboundary = () => {
-      if (generation === this.generation) signals.wordAt = performance.now();
+    utterance.onboundary = (event) => {
+      if (generation === this.generation && event.name === "word") lipSync.boundary(event.charIndex);
     };
-    utterance.onend = done;
-    utterance.onerror = done;
+    utterance.onend = utterance.onerror = () => {
+      if (generation === this.generation) lipSync.stop();
+      done();
+    };
     this.current = utterance;
     this.synth.speak(utterance);
   }

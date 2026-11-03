@@ -2,6 +2,8 @@ import { useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { cutOutBackground } from "./cutout";
+import { lipSync } from "./lipsync";
+import { MouthAtlas, type MouthCell } from "./mouthAtlas";
 import { mouthOpenness, signals } from "./signals";
 import { VideoLoop } from "./videoLoop";
 
@@ -19,11 +21,14 @@ interface Landmarks {
   headCenterY: number;
 }
 
-/** The AI-generated idle clip on a blue screen: breathes and blinks by itself. */
+/**
+ * The AI-generated idle clip on a blue screen: breathes and blinks by itself.
+ * Baked into a seamless loop from raw/: the brighter opening frames are cut, and
+ * a quarter-second cross-fade joins the end to the start where the eyes are
+ * open on both sides, so the slow blink never blends into a double image.
+ */
 const VIDEO = {
   url: "/videos/bao-idle.mp4",
-  // The model re-grades the colors after the very first frames; loop past them.
-  loopStart: 0.3,
   landmarks: {
     neck: new THREE.Vector2(0.5, 0.27),
     mouth: new THREE.Vector2(0.5, 0.325),
@@ -31,6 +36,20 @@ const VIDEO = {
     headCenterY: 0.53,
   } satisfies Landmarks,
 };
+
+/**
+ * The talk clip, looped forward then backward by scripts/make-loop.ts (its head
+ * never returns to the same place, so a cross-faded join would ghost). Shown
+ * while the panda speaks, with the lip-synced mouth pasted over its own.
+ */
+const TALK_VIDEO_URL = "/videos/bao-talk.mp4";
+/**
+ * The think clip, also ping-ponged. Shown while the model is generating an
+ * answer, between listening and speaking.
+ */
+const THINK_VIDEO_URL = "/videos/bao-think.mp4";
+/** Seconds to cross-fade between the idle, think and talk loops. */
+const TALK_FADE = 0.25;
 
 /** Fallback when the clip cannot play: the original portrait, cut out on the CPU. */
 const IMAGE = {
@@ -58,8 +77,12 @@ const vertexShader = /* glsl */ `
 
 const fragmentShader = /* glsl */ `
   uniform sampler2D uMap;
-  uniform sampler2D uMapNext;
-  uniform float uMix;
+  // The think loop, cross-faded over the idle loop while the model answers.
+  uniform sampler2D uThinkMap;
+  uniform float uThinkMix;
+  // The talk loop, cross-faded over the idle (or think) loop while the panda speaks.
+  uniform sampler2D uTalkMap;
+  uniform float uTalkMix;
   uniform float uChroma;
   uniform float uJaw;
   uniform float uMouth;
@@ -70,6 +93,18 @@ const fragmentShader = /* glsl */ `
   uniform vec2 uNeck;
   uniform vec2 uMouthCenter;
   uniform float uUpperLip;
+  // Lip sync: real mouths from the talk clip, pasted where the mouth sits on the live frame.
+  uniform sampler2D uLipAtlas;
+  uniform float uLipOn;
+  uniform vec4 uLipPatch;   // Patch on the idle video, from the top-left: x, y, width, height.
+  uniform vec4 uLipPatchTalk; // Same, on the talk video, whose head moves more.
+  uniform vec2 uLipGrid;    // Atlas columns, rows.
+  uniform vec2 uLipCellA;
+  uniform vec2 uLipCellB;
+  uniform vec3 uLipGainA;
+  uniform vec3 uLipGainB;
+  uniform float uLipMix;    // 0 shows cell A, 1 cell B.
+  uniform sampler2D uLipMask; // Over the patch: where the pasted mouth shows (the white fur around nose and mouth).
   varying vec2 vUv;
 
   vec2 rotate(vec2 p, float a) {
@@ -77,11 +112,32 @@ const fragmentShader = /* glsl */ `
     return vec2(c * p.x - s * p.y, s * p.x + c * p.y);
   }
 
-  // One avatar pixel: blends the two looping clips, and for video keys out
-  // the blue screen and removes the blue that bleeds into the fur's edges.
+  vec3 lipCell(vec2 cell, vec2 local) {
+    vec2 p = (cell + local) / uLipGrid;
+    return texture2D(uLipAtlas, vec2(p.x, 1.0 - p.y)).rgb;
+  }
+
+  // Pastes the lip-synced mouth onto one video frame, at that frame's mouth.
+  vec3 withMouth(vec3 color, vec2 uv, vec4 area) {
+    vec2 local = (vec2(uv.x, 1.0 - uv.y) - area.xy) / area.zw;
+    if (local.x <= 0.0 || local.x >= 1.0 || local.y <= 0.0 || local.y >= 1.0) return color;
+    float mask = texture2D(uLipMask, vec2(local.x, 1.0 - local.y)).r * uLipOn;
+    vec3 mouth = mix(lipCell(uLipCellA, local) * uLipGainA, lipCell(uLipCellB, local) * uLipGainB, uLipMix);
+    return mix(color, mouth, mask);
+  }
+
+  // One avatar pixel: for video, keys out the blue screen and removes the
+  // blue that bleeds into the fur's edges.
   vec4 avatar(vec2 uv) {
     vec4 color = texture2D(uMap, uv);
-    if (uMix > 0.0) color = mix(color, texture2D(uMapNext, uv), uMix);
+    if (uLipOn > 0.0) color.rgb = withMouth(color.rgb, uv, uLipPatch);
+    // Think has its own closed mouth; no lip paste. Talk wins when both mix.
+    if (uThinkMix > 0.0) color = mix(color, texture2D(uThinkMap, uv), uThinkMix);
+    if (uTalkMix > 0.0) {
+      vec4 talk = texture2D(uTalkMap, uv);
+      if (uLipOn > 0.0) talk.rgb = withMouth(talk.rgb, uv, uLipPatchTalk);
+      color = mix(color, talk, uTalkMix);
+    }
     if (uChroma > 0.5) {
       float key = color.b - max(color.r, color.g);
       color.a = 1.0 - smoothstep(0.06, 0.22, key);
@@ -111,13 +167,10 @@ const fragmentShader = /* glsl */ `
     float outside = 1.0 - avatar(uv + vec2(0.007, 0.006)).a;
     float rim = color.a * outside;
     color.rgb += vec3(1.0, 0.82, 0.55) * rim * 0.55;
-    // Settle the studio-lit portrait into the green, hazy forest light.
-    color.rgb = mix(color.rgb, color.rgb * vec3(0.93, 1.0, 0.9), 0.35);
 
-    // The bust dissolves into the mist instead of ending on the image's hard edges.
+    // The bust fades out instead of ending on the image's hard edges.
     float bust = smoothstep(0.02, 0.2, vUv.y) * smoothstep(0.0, 0.07, vUv.x) * smoothstep(1.0, 0.93, vUv.x);
     gl_FragColor = vec4(color.rgb, color.a * bust * uFade);
-    #include <colorspace_fragment>
   }`;
 
 /** Shared with the motes, which orbit the head while the panda thinks. */
@@ -136,7 +189,7 @@ export function Panda() {
   // The still portrait is only used when the clip cannot load at all.
   useEffect(() => {
     let cancelled = false;
-    const loop = new VideoLoop(VIDEO.url, VIDEO.loopStart);
+    const loop = new VideoLoop(VIDEO.url);
     const retryOnTap = () => {
       window.removeEventListener("pointerdown", retryOnTap);
       loop.start().catch((error) => console.warn("Avatar video still blocked:", error));
@@ -168,6 +221,56 @@ export function Panda() {
     };
   }, []);
 
+  // Optional: without them the panda stays on the idle loop for think / talk.
+  const [talk, setTalk] = useState<VideoLoop | null>(null);
+  const [think, setThink] = useState<VideoLoop | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const start = (url: string, label: string, set: (loop: VideoLoop) => void) => {
+      const loop = new VideoLoop(url);
+      const retryOnTap = () => {
+        window.removeEventListener("pointerdown", retryOnTap);
+        loop.start().catch((error) => console.warn(`${label} video still blocked:`, error));
+      };
+      loop.loaded
+        .then(() => {
+          if (cancelled) {
+            loop.dispose();
+            return;
+          }
+          set(loop);
+          // Always playing, so its texture is live the moment that phase starts.
+          loop.start().catch((error: unknown) => {
+            if (error instanceof DOMException && error.name === "NotAllowedError") window.addEventListener("pointerdown", retryOnTap);
+          });
+        })
+        .catch((error) => console.warn(`${label} video unavailable, staying on the idle loop:`, error));
+      return () => {
+        window.removeEventListener("pointerdown", retryOnTap);
+        loop.dispose();
+      };
+    };
+    const stopTalk = start(TALK_VIDEO_URL, "Talk", setTalk);
+    const stopThink = start(THINK_VIDEO_URL, "Think", setThink);
+    return () => {
+      cancelled = true;
+      stopTalk();
+      stopThink();
+    };
+  }, []);
+
+  // Optional: without the lip-sync assets the panda talks with the jaw warp only.
+  const [atlas, setAtlas] = useState<MouthAtlas | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    MouthAtlas.load()
+      .then((loaded) => !cancelled && setAtlas(loaded))
+      .catch((error) => console.warn("Lip sync unavailable:", error));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const landmarks = source?.kind === "image" ? IMAGE.landmarks : VIDEO.landmarks;
 
   const material = useMemo(
@@ -177,8 +280,10 @@ export function Panda() {
         depthWrite: false,
         uniforms: {
           uMap: { value: null },
-          uMapNext: { value: null },
-          uMix: { value: 0 },
+          uThinkMap: { value: null },
+          uThinkMix: { value: 0 },
+          uTalkMap: { value: null },
+          uTalkMix: { value: 0 },
           uChroma: { value: 0 },
           uJaw: { value: 1 },
           uMouth: { value: 0 },
@@ -191,6 +296,17 @@ export function Panda() {
           uNeck: { value: VIDEO.landmarks.neck },
           uMouthCenter: { value: VIDEO.landmarks.mouth },
           uUpperLip: { value: VIDEO.landmarks.upperLip },
+          uLipAtlas: { value: null },
+          uLipOn: { value: 0 },
+          uLipPatch: { value: new THREE.Vector4() },
+          uLipPatchTalk: { value: new THREE.Vector4() },
+          uLipGrid: { value: new THREE.Vector2(1, 1) },
+          uLipCellA: { value: new THREE.Vector2() },
+          uLipCellB: { value: new THREE.Vector2() },
+          uLipGainA: { value: new THREE.Vector3(1, 1, 1) },
+          uLipGainB: { value: new THREE.Vector3(1, 1, 1) },
+          uLipMix: { value: 0 },
+          uLipMask: { value: null },
         },
         vertexShader,
         fragmentShader,
@@ -205,15 +321,23 @@ export function Panda() {
     u.uUpperLip.value = landmarks.upperLip;
     if (source?.kind === "image") {
       u.uMap.value = source.texture;
-      u.uMix.value = 0;
       u.uChroma.value = 0;
       u.uJaw.value = 1;
     } else if (source?.kind === "video") {
+      u.uMap.value = source.loop.texture;
       u.uChroma.value = 1;
-      // The clip's mouth is closed: a smaller jaw warp reads as talking, a big one as stretching.
-      u.uJaw.value = 0.55;
+      // Real mouths replace the jaw warp; without the atlas, a small warp still reads as talking.
+      u.uJaw.value = atlas ? 0 : 0.55;
     }
-  }, [material, source, landmarks]);
+  }, [material, source, landmarks, atlas]);
+
+  useEffect(() => {
+    if (!atlas) return;
+    const u = material.uniforms;
+    u.uLipAtlas.value = atlas.texture;
+    u.uLipGrid.value = atlas.grid;
+    u.uLipMask.value = atlas.mask;
+  }, [material, atlas]);
 
   // Fit the portrait to the screen: the faded shoulders sit behind the controls,
   // the face stays clear above them.
@@ -242,6 +366,22 @@ export function Panda() {
   }, [size.width, size.height, landmarks]);
 
   const motion = useRef({ tilt: 0, nod: 0, mouth: 0, speak: 0, lean: 1, speakingSince: 0, wasSpeaking: false });
+  const lip = useRef<{ open: number; wide: number; from: MouthCell | null; to: MouthCell | null; mix: number }>({
+    open: 0,
+    wide: 0.5,
+    from: null,
+    to: null,
+    mix: 1,
+  });
+  /**
+   * Which loop is (or is fading to) on screen, when that fade started, and when
+   * the hidden loop was last moved to open eyes (clock seconds).
+   */
+  const talkSwitch = useRef<{ talking: boolean; since: number | null; seekedAt: number | null }>({
+    talking: false,
+    since: null,
+    seekedAt: null,
+  });
 
   useFrame((state, rawDelta) => {
     const delta = Math.min(rawDelta, 0.05);
@@ -278,17 +418,80 @@ export function Panda() {
     m.mouth = ease(m.mouth, mouthOpenness(now), 22);
     m.nod = ease(m.nod, signals.speaking ? Math.sin(t * 4.3) * 0.004 * (0.4 + m.mouth) : 0, 8);
 
-    if (source?.kind === "video") {
-      const frame = source.loop.update();
-      u.uMap.value = frame.from;
-      u.uMapNext.value = frame.to;
-      u.uMix.value = frame.mix;
+    if (source?.kind === "video" && atlas) {
+      const l = lip.current;
+      const shape = lipSync.sample(now);
+      l.open = ease(l.open, shape.open, 30);
+      l.wide = ease(l.wide, shape.wide, 30);
+      const cell = atlas.pick(l.open, l.wide);
+      if (cell !== l.to) {
+        l.from = l.to ?? cell;
+        l.to = cell;
+        l.mix = 0;
+      }
+      // Mouths cut rather than morph, like drawn animation; a very short blend hides the pop.
+      l.mix = Math.min(1, l.mix + delta / 0.045);
+      u.uLipCellA.value = l.from!.cell;
+      u.uLipGainA.value = l.from!.gain;
+      u.uLipCellB.value = cell.cell;
+      u.uLipGainB.value = cell.gain;
+      u.uLipMix.value = l.mix;
+      atlas.patchAt(source.loop.mediaTime, u.uLipPatch.value);
+
+      // Think loop: shown while waiting for the answer. No eye gating (no track), short fade.
+      u.uThinkMap.value = think?.texture ?? null;
+      // ~TALK_FADE seconds to settle (exponential ease needs ~3/rate).
+      u.uThinkMix.value = think ? ease(u.uThinkMix.value, phase === "thinking" ? 1 : 0, 3 / TALK_FADE) : 0;
+
+      // The talk loop's own mouth moves at random, so it is only shown with a pasted mouth.
+      const canTalk = !!talk && atlas.hasTalkLoop;
+      u.uTalkMap.value = canTalk ? talk.texture : null;
+      if (canTalk) {
+        const sw = talkSwitch.current;
+        // Switch only while the eyes stay open on both loops for the whole fade,
+        // so a blink never cross-fades into open eyes. The loop on screen is
+        // waited for; the hidden one is moved to frames with open eyes. Waiting
+        // costs little: the lip-synced mouth already works on either loop.
+        const span = TALK_FADE + 0.1;
+        if (sw.since === null && signals.speaking !== sw.talking) {
+          const [shown, hidden] = sw.talking ? (["talk", "idle"] as const) : (["idle", "talk"] as const);
+          const shownLoop = sw.talking ? talk : source.loop;
+          const hiddenLoop = sw.talking ? source.loop : talk;
+          if (atlas.eyesOpen(shown, shownLoop.mediaTime, span)) {
+            if (atlas.eyesOpen(hidden, hiddenLoop.mediaTime, span)) {
+              sw.talking = signals.speaking;
+              sw.since = t;
+              sw.seekedAt = null;
+            } else if (sw.seekedAt === null || t - sw.seekedAt > 0.5) {
+              // A margin for the seek to land before the window starts.
+              const target = atlas.nextOpen(hidden, hiddenLoop.mediaTime, span + 0.4);
+              if (target !== null) hiddenLoop.seek(target);
+              sw.seekedAt = t;
+            }
+          }
+        }
+        const p = sw.since === null ? 1 : Math.min(1, (t - sw.since) / TALK_FADE);
+        if (p >= 1) sw.since = null;
+        const s = p * p * (3 - 2 * p);
+        u.uTalkMix.value = sw.talking ? s : 1 - s;
+        atlas.patchAt(talk.mediaTime, u.uLipPatchTalk.value, "talk");
+      } else {
+        u.uTalkMix.value = 0;
+      }
+      // Between sentences the voice pauses, but the talk loop still shows: keep its mouth covered (closed).
+      u.uLipOn.value = ease(u.uLipOn.value, Math.max(shape.active, u.uTalkMix.value > 0.01 ? 1 : 0), 25);
+    } else {
+      u.uLipOn.value = 0;
+      u.uTalkMix.value = 0;
+      u.uThinkMap.value = think?.texture ?? null;
+      u.uThinkMix.value = think ? ease(u.uThinkMix.value, phase === "thinking" ? 1 : 0, 3 / TALK_FADE) : 0;
     }
 
     u.uTilt.value = m.tilt;
     u.uMouth.value = m.mouth;
     u.uSpeak.value = m.speak;
-    u.uNod.value = m.nod;
+    // Think and talk loops already animate the head.
+    u.uNod.value = m.nod * (1 - Math.max(u.uTalkMix.value, u.uThinkMix.value));
     // The video already breathes; the still portrait needs a little help.
     u.uBreath.value = source?.kind === "image" ? Math.sin(t * 1.55) * 0.0045 : 0;
     u.uSway.value = Math.sin(t * 0.62) * 0.004;
@@ -306,7 +509,7 @@ export function Panda() {
 
   return (
     <group>
-      {/* A soft light behind the head separates the character from the forest. */}
+      {/* A soft light behind the head separates the character from the background. */}
       <mesh ref={halo} position={[0, pandaHead.y, PANDA_Z - 1.5]} rotation-x={-CAMERA_PITCH} scale={layout.scale * 1.7}>
         <planeGeometry />
         <meshBasicMaterial map={haloTexture()} transparent depthWrite={false} blending={THREE.AdditiveBlending} opacity={0} toneMapped={false} />

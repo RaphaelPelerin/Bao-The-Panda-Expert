@@ -3,7 +3,7 @@
 Bao is a panda avatar standing in a living bamboo forest. You ask questions out loud and Bao answers out loud, but only about pandas. Anything else gets a polite refusal.
 
 - **Voice in**: Web Speech API recognition, with live captions while you speak.
-- **Answers**: Qwen Flash by default (fast and cheap, thinking off), or any OpenAI-compatible LLM, or Claude, streamed. A server-side guard rejects off-topic questions before any text leaves the server.
+- **Answers**: Qwen Flash on Alibaba Cloud Model Studio's free quota (fast, thinking off), streamed. A server-side guard rejects off-topic questions before any text leaves the server.
 - **Voice out**: browser text-to-speech that starts on the first sentence while the rest of the answer is still being written.
 - **Avatar**: five visible states (idle, listening, thinking, speaking, refusing) driven by one state machine and rendered in a real-time three.js scene: bamboo and leaves bending in shared wind gusts, light shafts, pollen, falling leaves.
 - **Always works**: no API key, no network or no microphone still gives a full demo. The server falls back to a built-in panda knowledge base, and a text field replaces the mic.
@@ -20,23 +20,22 @@ npm run dev             # http://localhost:5173
 
 Without a key, Bao answers from the offline knowledge base. The latency panel (press **D**) shows which provider answered.
 
-### Choosing a model
+### The model
 
-| Provider | `.env` | Notes |
-|---|---|---|
-| Qwen (Alibaba Cloud Model Studio) | `LLM_API_KEY=…` (`LLM_PROVIDER=qwen-intl` is the default; use `qwen` for a mainland China account) | Default. Model `qwen-flash` with thinking turned off: short factual answers don't need reasoning, so it answers straight away. Cheap, and new accounts usually get a free quota. |
-| DeepSeek | `LLM_PROVIDER=deepseek`, `LLM_API_KEY=…` | Model `deepseek-chat` (non-reasoning mode). Paid balance. |
-| Any other OpenAI-compatible API (Kimi, GLM, Groq…) | `LLM_PROVIDER=<name>`, `LLM_BASE_URL=…`, `LLM_MODEL=…`, `LLM_API_KEY=…` | |
-| Claude | `ANTHROPIC_API_KEY=…` | Used when no `LLM_API_KEY` is set. Not available in mainland China. |
+Bao answers with `qwen-flash-character` (Qwen Flash tuned for role-play) on Alibaba Cloud Model Studio, thinking turned off: short factual answers don't need reasoning, so it answers straight away. Put the Model Studio API key in `LLM_API_KEY`. `LLM_PROVIDER=qwen-intl` (the default) is the Singapore region, the one with the free quota; use `qwen` for a mainland China account.
 
-Model names change often: check the provider's console and override with `LLM_MODEL` if needed. In `auto` mode, a provider with a bad key or no network is skipped, and an exhausted quota falls back to the next provider for that question. The panda never goes silent.
+In `auto` mode, a bad key or no network switches to the offline knowledge base for the rest of the run. When the free quota runs out, each question is answered offline until Model Studio accepts requests again. The panda never goes silent. `OPENROUTER_API_KEY` is only for video generation (`scripts/generate-video.ts`).
+
+**Staying on the free quota.** The free quota is a fixed number of tokens valid for 90 days, and Model Studio bills automatically once it's used up. Two safeguards:
+- In the Model Studio console, **Model usage → Free Quota**, turn on **Stop-on-Exhaust** for `qwen-flash-character`. Alibaba then refuses calls instead of billing when the quota runs out, and Bao switches to offline answers.
+- `QWEN_DAILY_LIMIT` (default 100) caps the questions sent to Qwen per day, so the quota lasts. Each question uses about 500–1,000 tokens. The count is kept in `.qwen-usage.json` and resets at midnight.
 
 Only the server calls the LLM, so the region to pick is where the server runs and where the account was created, not where visitors are. Also note that Chrome's speech recognition relies on Google servers, which are blocked there; the text input still works.
 
 | Command | What it does |
 |---|---|
 | `npm run dev` | Front end and `/api/ask` in one Vite process, with hot reload for both |
-| `npm test` | Unit tests: topic guard, providers (against a mock OpenAI-compatible server), offline expert, state machine, sentence splitter, request validation |
+| `npm test` | Unit tests: topic guard, Qwen provider (against a mock server), offline expert, state machine, sentence splitter, request validation |
 | `npm run eval` | Runs 17 in-scope, out-of-scope and adversarial questions against the live model and checks every verdict (needs a key) |
 | `npm run build && npm start` | Production build served by a small Node server on port 8787 |
 
@@ -59,7 +58,7 @@ MicLevel (Web Audio) ─ loudness ──────┼──▶ signals      PO
                                       │    (per frame)        │
 useConversation (orchestrator) ◀──────┘                       ▼
    │  dispatches events                                 provider stream ("[IN] Pandas eat…")
-   ▼                                                          │   Qwen Flash → Claude → offline
+   ▼                                                          │   Qwen Flash → offline
 reduce() state machine                                        ▼
    idle → listening → thinking → speaking → idle        readVerdict(): reads the tag first, fails closed
    │                                                          │
@@ -101,7 +100,7 @@ The plan is to replace this with AI-generated video clips per state; the transit
 
 | If this is missing | What happens |
 |---|---|
-| API key, quota or network | Next provider in the chain, ending with the offline knowledge base (same streaming contract) |
+| API key, quota or network | The offline knowledge base (same streaming contract) |
 | `speechSynthesis` | Timed silent playback, so the states still flow |
 | Speech recognition | Text input |
 | Microphone permission | Clear message, then the app recovers by itself |
@@ -110,13 +109,13 @@ The plan is to replace this with AI-generated video clips per state; the transit
 
 ```
 server/            ask.ts (HTTP + SSE), guard.ts, prompt.ts, index.ts
-                   providers/{index,openaiCompatible,claude,offline,knowledge}.ts
+                   providers/{index,qwen,offline,knowledge}.ts
 shared/protocol.ts request and event types shared by client and server
 src/state/         machine.ts, useConversation.ts, metrics.ts
 src/voice/         stt.ts, tts.ts, micLevel.ts
 src/llm/           askStream.ts (SSE client), sentences.ts
 src/avatar/        Panda.tsx (shader), cutout.ts, signals.ts
-src/scene/         Scene.tsx, Bamboo.tsx (instanced stalks + leaves, wind shader), Atmosphere.tsx, FallingLeaves.tsx
+src/scene/         Scene.tsx (the panda on a transparent canvas over public/background.jpg)
 src/ui/            MicButton, DebugPanel, strings (EN/FR), icons
 test/              Vitest suites
 scripts/           eval-guard.ts (live verdict check)
@@ -126,15 +125,14 @@ scripts/           eval-guard.ts (live verdict check)
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `LLM_API_KEY` | none | Key for the OpenAI-compatible provider. Enables it. |
-| `LLM_PROVIDER` | `qwen-intl` | Preset: `qwen-intl`, `qwen`, `deepseek`, or any name with `LLM_BASE_URL` + `LLM_MODEL` |
-| `LLM_BASE_URL`, `LLM_MODEL` | from the preset | Overrides |
-| `ANTHROPIC_API_KEY` | none | Claude credentials |
-| `PANDA_MODEL` | `claude-opus-5-5` | Claude model. Use `claude-haiku-5-5` for lower latency |
-| `PANDA_PROVIDER` | `auto` | `auto` (OpenAI-compatible, then Claude, then offline), `openai`, `claude`, or `offline` |
+| `LLM_API_KEY` | none | Qwen Flash on Alibaba Cloud Model Studio. Enables it. |
+| `LLM_PROVIDER` | `qwen-intl` | Model Studio region: `qwen-intl` or `qwen` (mainland China) |
+| `QWEN_DAILY_LIMIT` | `100` | Questions per day sent to Qwen, then offline until midnight. `0` for no limit |
+| `PANDA_PROVIDER` | `auto` | `auto` (Qwen, then offline), `qwen`, or `offline` |
+| `OPENROUTER_API_KEY` | none | Video generation only (`scripts/generate-video.ts`) |
 | `PORT` | `8787` | Port for `npm start` |
 
-Answers are kept short (two to four spoken sentences). OpenAI-compatible requests use a low temperature so the topic tag stays reliable. The Claude request uses low effort. It also enables server-side refusal fallback: if the model's safety system declines, the request is retried on another model inside the same call.
+Answers are kept short (two to four spoken sentences), with a low temperature so the topic tag stays reliable.
 
 ## Known limits
 
