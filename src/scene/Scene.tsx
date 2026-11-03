@@ -46,13 +46,15 @@ function CameraRig() {
 }
 
 /**
- * Keeps the frame rate smooth on weaker machines: every two seconds, lowers
- * the render resolution if the scene runs under ~45 fps, and raises it back
- * when there is headroom. Also publishes the measured fps for the debug panel.
+ * Keeps the frame rate smooth on weaker machines: lowers the render resolution
+ * when the scene runs under ~45 fps twice in a row. It never raises it again:
+ * each change resizes every render target, which can flash, so going back and
+ * forth every few seconds is worse than a slightly softer picture. Also
+ * publishes the measured fps for the debug panel.
  */
 function AdaptiveResolution() {
   const setDpr = useThree((state) => state.setDpr);
-  const sample = useRef({ frames: 0, time: 0, dpr: MAX_DPR });
+  const sample = useRef({ frames: 0, time: 0, slow: 0, dpr: MAX_DPR });
   useFrame((_, delta) => {
     const s = sample.current;
     s.frames++;
@@ -60,12 +62,11 @@ function AdaptiveResolution() {
     if (s.time < 2) return;
     const fps = s.frames / s.time;
     signals.fps = Math.round(fps);
-    let next = s.dpr;
-    if (fps < 45) next = Math.max(MIN_DPR, s.dpr - 0.2);
-    else if (fps > 58) next = Math.min(MAX_DPR, s.dpr + 0.1);
-    if (next !== s.dpr) {
-      s.dpr = next;
-      setDpr(next);
+    s.slow = fps < 45 ? s.slow + 1 : 0;
+    if (s.slow >= 2 && s.dpr > MIN_DPR) {
+      s.dpr = Math.max(MIN_DPR, s.dpr - 0.25);
+      s.slow = 0;
+      setDpr(s.dpr);
     }
     signals.renderScale = s.dpr;
     s.frames = 0;
