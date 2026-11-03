@@ -15,6 +15,9 @@ export const signals = {
   wordAt: 0,
   /** Whether the last answer was a polite refusal. */
   refusing: false,
+  /** Measured frame rate and current render scale, shown in the debug panel. */
+  fps: 0,
+  renderScale: 1,
 };
 
 /**

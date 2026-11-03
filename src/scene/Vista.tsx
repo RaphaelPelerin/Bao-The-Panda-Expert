@@ -390,9 +390,10 @@ function Mist() {
   );
   return (
     <group>
-      {[-24, -41, -60].map((z, i) => (
-        <mesh key={z} position={[i * 9 - 6, WATER_Y + 1.6 + i * 0.6, z]} material={material}>
-          <planeGeometry args={[240, 4 + i * 1.5]} />
+      {/* Two banks only, sized to the visible width: each costs a noise lookup per covered pixel. */}
+      {[-28, -52].map((z, i) => (
+        <mesh key={z} position={[i * 8 - 4, WATER_Y + 1.7 + i * 0.7, z]} material={material}>
+          <planeGeometry args={[110 + i * 50, 4.5 + i * 1.5]} />
         </mesh>
       ))}
     </group>
