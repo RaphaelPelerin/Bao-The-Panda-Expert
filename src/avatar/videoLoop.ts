@@ -1,17 +1,26 @@
 import * as THREE from "three";
 
+/** How long the next player runs, unseen, before the cross-fade starts. */
+const PREROLL_SECONDS = 0.25;
+
 /**
  * Loops an avatar clip with no visible seam. Two <video> elements play the
  * same file in turn: shortly before one reaches the end, the other starts at
  * `loopStart` and the shader cross-fades between their textures. AI-generated
  * clips rarely end on exactly their first frame, so a short fade hides the jump.
+ *
+ * three.js only uploads a video frame when the browser reports it as presented,
+ * which never happens for a paused player. So every seek forces an upload, and
+ * the next player starts a little before the fade: its texture is already live
+ * when the blend begins (otherwise the fade mixes in an empty or stale frame).
  */
 export class VideoLoop {
   private readonly videos: [HTMLVideoElement, HTMLVideoElement];
   private readonly textures: [THREE.VideoTexture, THREE.VideoTexture];
   private current = 0;
+  private prerolling = false;
   private fading = false;
-  /** Resolves once both players hold the loop's first frame; rejects if the clip cannot load. */
+  /** Resolves once both players hold their first frame; rejects if the clip cannot load. */
   readonly loaded: Promise<void>;
 
   constructor(
@@ -36,7 +45,12 @@ export class VideoLoop {
       return texture;
     }) as [THREE.VideoTexture, THREE.VideoTexture];
 
-    this.loaded = Promise.all(videos.map((video) => seek(video, loopStart))).then(() => undefined);
+    this.loaded = Promise.all([this.seek(0, loopStart), this.seek(1, this.prerollStart)]).then(() => undefined);
+  }
+
+  /** Where a waiting player sits, so it reaches `loopStart` right as the fade begins. */
+  private get prerollStart(): number {
+    return Math.max(0, this.loopStart - PREROLL_SECONDS);
   }
 
   /**
@@ -56,17 +70,21 @@ export class VideoLoop {
     let mix = 0;
 
     if (Number.isFinite(end)) {
-      if (!this.fading && active.currentTime >= end - this.fadeSeconds) {
-        this.fading = true;
+      const fadeStart = end - this.fadeSeconds;
+      const preroll = this.loopStart - this.prerollStart;
+      if (!this.prerolling && active.currentTime >= fadeStart - preroll) {
+        this.prerolling = true;
         void next.play();
       }
+      if (!this.fading && active.currentTime >= fadeStart) this.fading = true;
       if (this.fading) {
-        mix = Math.min(1, Math.max(0, (active.currentTime - (end - this.fadeSeconds)) / this.fadeSeconds));
+        mix = Math.min(1, Math.max(0, (active.currentTime - fadeStart) / this.fadeSeconds));
         if (active.ended || mix >= 1) {
-          // The other clip takes over; rewind this one so it is ready for the next turn.
+          // The other player takes over; rewind this one, ready for the next turn.
           active.pause();
-          void seek(active, this.loopStart);
+          void this.seek(this.current, this.prerollStart);
           this.current = 1 - this.current;
+          this.prerolling = false;
           this.fading = false;
           mix = 0;
         }
@@ -83,22 +101,25 @@ export class VideoLoop {
     }
     for (const texture of this.textures) texture.dispose();
   }
-}
 
-function seek(video: HTMLVideoElement, time: number): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const done = () => {
-      video.removeEventListener("seeked", done);
-      video.removeEventListener("error", fail);
-      resolve();
-    };
-    const fail = () => reject(new Error(`Could not load ${video.src}`));
-    video.addEventListener("seeked", done);
-    video.addEventListener("error", fail, { once: true });
-    if (video.readyState >= HTMLMediaElement.HAVE_METADATA) {
-      video.currentTime = time;
-    } else {
-      video.addEventListener("loadedmetadata", () => (video.currentTime = time), { once: true });
-    }
-  });
+  /** Seeks one player and uploads the frame it lands on, even while paused. */
+  private async seek(index: number, time: number): Promise<void> {
+    const video = this.videos[index];
+    await new Promise<void>((resolve, reject) => {
+      const done = () => {
+        video.removeEventListener("seeked", done);
+        video.removeEventListener("error", fail);
+        resolve();
+      };
+      const fail = () => reject(new Error(`Could not load ${video.src}`));
+      video.addEventListener("seeked", done);
+      video.addEventListener("error", fail, { once: true });
+      if (video.readyState >= HTMLMediaElement.HAVE_METADATA) {
+        video.currentTime = time;
+      } else {
+        video.addEventListener("loadedmetadata", () => (video.currentTime = time), { once: true });
+      }
+    });
+    if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) this.textures[index].needsUpdate = true;
+  }
 }
