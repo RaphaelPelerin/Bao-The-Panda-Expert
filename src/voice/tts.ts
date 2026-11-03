@@ -9,14 +9,19 @@ export interface TtsHandlers {
   onDone(): void;
 }
 
-const LOCALES: Record<Lang, string> = { en: "en-US", fr: "fr-FR" };
-const PREFERRED = /natural|neural|online|premium|enhanced|google/i;
+const LOCALES: Record<Lang, string> = { en: "en-US", fr: "fr-FR", zh: "zh-CN" };
+/** Prefer voices that ship with the OS. */
+const LOCAL_HINT = /local|desktop|offline|microsoft|apple|siri|samantha|ting-ting|mei-jia|sin-ji|xiaoxiao|xiaoyi|yunxia|yunyang|huihui|kangkang|hanhan|yaoyao/i;
+
+/** Google and "Online" cloud voices are never used. */
+export function isCloudVoice(voice: { name: string; voiceURI?: string }): boolean {
+  return /google|\bonline\b/i.test(`${voice.name} ${voice.voiceURI ?? ""}`);
+}
 
 /**
- * Sentence queue over speechSynthesis. Sentences can be added while the answer
- * is still streaming in, so the panda starts talking after the first sentence.
- * Without speechSynthesis it runs a silent timer so the rest of the app behaves
- * the same.
+ * Sentence queue over the browser's free local speechSynthesis. No Google
+ * speech and no paid/LLM speech API. Cloud voices are skipped. Without a
+ * matching local voice it runs a silent timer so the conversation still moves.
  */
 export class SpeechOutput {
   private queue: string[] = [];
@@ -90,10 +95,9 @@ export class SpeechOutput {
       this.pump();
     };
 
-    if (!this.synth) {
+    if (!this.synth || !this.voice) {
       this.markStarted();
-      // Roughly the pace of speech: about 170 words a minute.
-      const duration = Math.max(800, next.split(/\s+/).length * 350);
+      const duration = silentDuration(next);
       lipSync.start(next, this.lang, 1, duration);
       setTimeout(done, duration);
       return;
@@ -101,7 +105,7 @@ export class SpeechOutput {
 
     const utterance = new SpeechSynthesisUtterance(next);
     utterance.lang = LOCALES[this.lang];
-    if (this.voice) utterance.voice = this.voice;
+    utterance.voice = this.voice;
     utterance.rate = 1.02;
     utterance.pitch = 1.12;
     utterance.onstart = () => {
@@ -129,7 +133,22 @@ export class SpeechOutput {
 
   private pickVoice(): void {
     const voices = this.synth?.getVoices() ?? [];
-    const matching = voices.filter((v) => v.lang.toLowerCase().startsWith(this.lang));
-    this.voice = matching.find((v) => PREFERRED.test(v.name)) ?? matching.find((v) => v.default) ?? matching[0] ?? null;
+    const matching = voices.filter((v) => voiceMatches(v.lang, this.lang) && !isCloudVoice(v));
+    const mandarin = this.lang === "zh" ? matching.filter((v) => /^(zh-cn|zh-hans|cmn)/i.test(v.lang.replace("_", "-"))) : matching;
+    const pool = mandarin.length ? mandarin : matching;
+    this.voice = pool.find((v) => LOCAL_HINT.test(v.name)) ?? pool.find((v) => v.default) ?? pool[0] ?? null;
   }
+}
+
+/** Mandarin is about four syllables a second; everything else stays near 170 words a minute. */
+function silentDuration(text: string): number {
+  const han = text.match(/\p{Script=Han}/gu)?.length ?? 0;
+  const words = text.replace(/\p{Script=Han}/gu, " ").split(/\s+/).filter(Boolean).length;
+  return Math.max(800, han * 240 + words * 350);
+}
+
+function voiceMatches(voiceLang: string, lang: Lang): boolean {
+  const code = voiceLang.toLowerCase().replace("_", "-");
+  if (lang === "zh") return code.startsWith("zh") || code.startsWith("cmn");
+  return code.startsWith(lang);
 }

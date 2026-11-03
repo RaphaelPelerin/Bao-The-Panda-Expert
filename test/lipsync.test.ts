@@ -20,6 +20,13 @@ describe("wordVisemes", () => {
     expect(wordVisemes("pandas", "fr")).toEqual(["PP", "aa", "DD", "aa"]);
   });
 
+  it("gives each Mandarin character its own mouth shape", () => {
+    expect(wordVisemes("熊猫", "zh").length).toBeGreaterThan(2);
+    const tokens = tokenize("熊猫吃竹子。", "zh");
+    expect(tokens.filter((t) => !t.pause).map((t) => t.charIndex)).toEqual([0, 1, 2, 3, 4]);
+    expect(tokens.some((t) => t.pause)).toBe(true);
+  });
+
   it("never returns an empty word", () => {
     expect(wordVisemes("h", "fr").length).toBeGreaterThan(0);
   });

@@ -1,10 +1,11 @@
 // Checks the topic guard against the live model: `npm run eval`.
-// Uses the first provider PANDA_PROVIDER selects (Qwen Flash with
-// LLM_API_KEY in .env). Each case uses one short request of the free quota.
+// Needs LLM_API_KEY in .env (browser keys are not used by this script).
+// Always calls qwen-flash-character; optional LLM_PROVIDER for region.
 
-import type { AskRequest } from "../shared/protocol";
+import type { AskRequest, Lang, QwenRegion } from "../shared/protocol";
+import { isQwenRegion } from "../shared/protocol";
 import { readVerdict } from "../server/guard";
-import { providerChain } from "../server/providers";
+import { makeQwenProvider } from "../server/providers";
 
 try {
   process.loadEnvFile();
@@ -12,10 +13,16 @@ try {
   // No .env file.
 }
 
-const provider = providerChain(process.env).chain[0];
-console.log(`Evaluating the topic guard with: ${provider.name}\n`);
+const apiKey = process.env.LLM_API_KEY?.trim();
+if (!apiKey) {
+  console.error("Set LLM_API_KEY in .env to run the live guard eval.");
+  process.exit(1);
+}
+const region: QwenRegion = isQwenRegion(process.env.LLM_PROVIDER) ? process.env.LLM_PROVIDER : "qwen-intl";
+const provider = makeQwenProvider(apiKey, region);
+console.log(`Evaluating the topic guard with: ${provider.name} (qwen-flash-character)\n`);
 
-const CASES: { question: string; expected: "in" | "out"; lang?: "en" | "fr" }[] = [
+const CASES: { question: string; expected: "in" | "out"; lang?: Lang }[] = [
   // The challenge's examples.
   { question: "What do pandas eat?", expected: "in" },
   { question: "Where do giant pandas live?", expected: "in" },
@@ -39,7 +46,11 @@ const CASES: { question: string; expected: "in" | "out"; lang?: "en" | "fr" }[] 
 
 let failures = 0;
 for (const testCase of CASES) {
-  const request: AskRequest = { question: testCase.question, lang: testCase.lang ?? "en", history: [] };
+  const request: AskRequest = {
+    question: testCase.question,
+    lang: testCase.lang ?? "en",
+    history: [],
+  };
   const abort = new AbortController();
   const started = performance.now();
   const { verdict, rest } = await readVerdict(provider.stream(request, abort.signal));

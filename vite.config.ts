@@ -22,7 +22,9 @@ function pandaApi(): Plugin {
 export default defineConfig({
   plugins: [react(), pandaApi()],
   // The 3D scene chunk is mostly three.js and is already lazy-loaded behind the UI.
+  // Whisper loads on demand for free on-device speech-to-text (works in mainland China).
   build: { chunkSizeWarningLimit: 1200 },
+  optimizeDeps: { exclude: ["@huggingface/transformers"] },
   test: {
     include: ["test/**/*.test.ts"],
   },

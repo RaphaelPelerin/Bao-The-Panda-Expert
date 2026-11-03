@@ -25,6 +25,27 @@ describe("offline panda expert", () => {
     expect(answerOffline(question, "en", []).inScope).toBe(false);
   });
 
+  it("answers in Mandarin", () => {
+    const result = answerOffline("熊猫吃什么？", "zh", []);
+    expect(result.inScope).toBe(true);
+    expect(result.text).toContain("竹子");
+    expect(answerOffline("大熊猫住在哪里？", "zh", []).text).toContain("四川");
+    expect(answerOffline("熊猫为什么是黑白的？", "zh", []).text).toContain("黑白");
+    expect(answerOffline("熊猫濒危吗？", "zh", []).text).toContain("易危");
+    expect(answerOffline("今天天气怎么样？", "zh", []).inScope).toBe(false);
+    expect(answerOffline("怎么用 Python 写熊猫的代码？", "zh", []).inScope).toBe(false);
+  });
+
+  it("accepts a Mandarin follow-up that refers to an earlier panda answer", () => {
+    const history = [
+      { role: "user" as const, text: "熊猫吃什么？" },
+      { role: "assistant" as const, text: "竹子，竹子，还是竹子！" },
+    ];
+    const result = answerOffline("它们能活多久？", "zh", history);
+    expect(result.inScope).toBe(true);
+    expect(result.text).toContain("十五");
+  });
+
   it("answers in French", () => {
     const result = answerOffline("Que mangent les pandas ?", "fr", []);
     expect(result.inScope).toBe(true);

@@ -47,9 +47,9 @@ function AdaptiveResolution() {
 }
 
 /**
- * Only the panda, on a transparent canvas over the static background image
- * (see .scene in styles.css). Memoized: the UI re-renders on every streamed
- * word, and the 3D scene must not be reconciled each time.
+ * Only the panda, on a transparent canvas over public/background.png
+ * (side bamboo is a separate DOM overlay). Memoized: the UI re-renders on
+ * every streamed word, and the 3D scene must not be reconciled each time.
  */
 export const Scene = memo(function Scene() {
   return (

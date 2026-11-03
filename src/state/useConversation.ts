@@ -14,26 +14,36 @@ const STT_ERRORS: Record<SttErrorKind, Record<Lang, string>> = {
   denied: {
     en: "I can't hear you: microphone access is blocked. You can type your question instead.",
     fr: "Je ne t'entends pas : l'accès au micro est bloqué. Tu peux écrire ta question à la place.",
+    zh: "我听不见：麦克风被关掉了。你也可以直接把问题打出来。",
   },
-  network: {
-    en: "Speech recognition needs a connection. Try again, or type your question.",
-    fr: "La reconnaissance vocale a besoin d'une connexion. Réessaie ou écris ta question.",
+  "no-speech": { en: "", fr: "", zh: "" },
+  unavailable: {
+    en: "Couldn't load the free speech model (check the network, then try the mic again). You can type instead.",
+    fr: "Impossible de charger le modèle vocal (vérifie la connexion, puis réessaie). Tu peux aussi écrire.",
+    zh: "免费语音模型加载失败（请检查网络后重试麦克风）。你也可以直接打字。",
   },
-  "no-speech": { en: "", fr: "" },
   other: {
     en: "Something went wrong with the microphone. You can type your question instead.",
     fr: "Un souci avec le micro. Tu peux écrire ta question à la place.",
+    zh: "麦克风出了点问题。你也可以直接把问题打出来。",
   },
 };
 
 const ANSWER_FAILED: Record<Lang, string> = {
   en: "I lost my train of thought. Please try again!",
   fr: "J'ai perdu le fil. Réessaie, s'il te plaît !",
+  zh: "我刚才走神了。请再试一次！",
+};
+
+const SERVER_KEY_MISSING: Record<Lang, string> = {
+  en: "Bao isn't connected to the answer service yet. Try again later.",
+  fr: "Bao n'est pas encore branché au service de réponses. Réessaie plus tard.",
+  zh: "回答服务还没接好，请稍后再试。",
 };
 
 /**
- * Orchestrates one conversation: microphone → speech recognition → /api/ask
- * stream → sentence queue → text-to-speech, feeding the state machine at each step.
+ * Orchestrates one conversation: mic (on-device Whisper) or typed question →
+ * /api/ask stream → sentence queue → local OS text-to-speech.
  */
 export function useConversation() {
   const [state, dispatch] = useReducer(reduce, initialState);
@@ -43,7 +53,6 @@ export function useConversation() {
   const request = useRef<AbortController | null>(null);
 
   const voice = useRef<{ stt: SpeechInput; tts: SpeechOutput; mic: MicLevel } | null>(null);
-  // Created once; handlers reach the latest callbacks through refs.
   const askRef = useRef<(question: string) => void>(() => {});
   const pending = useRef<{ question: string; answer: string } | null>(null);
 
@@ -84,7 +93,6 @@ export function useConversation() {
   }
   const { stt, tts, mic } = voice.current;
 
-  /** Stops anything in flight: recognition, generation and speech. */
   const interrupt = useCallback(() => {
     stt.abort();
     mic.stop();
@@ -139,7 +147,11 @@ export function useConversation() {
         if (controller.signal.aborted) return;
         console.error(error);
         tts.reset();
-        dispatch({ type: "FAIL", message: ANSWER_FAILED[langRef.current] });
+        const missing = error instanceof Error && error.message === "missing-key";
+        dispatch({
+          type: "FAIL",
+          message: missing ? SERVER_KEY_MISSING[langRef.current] : ANSWER_FAILED[langRef.current],
+        });
       });
     },
     [interrupt, tts],
@@ -153,7 +165,6 @@ export function useConversation() {
     stt.start(langRef.current);
   }, [interrupt, mic, stt]);
 
-  /** Mic button: start listening, or finish early if already listening. */
   const toggleMic = useCallback(() => {
     if (state.status === "listening") stt.stop();
     else listen();
@@ -171,7 +182,6 @@ export function useConversation() {
     [interrupt, tts],
   );
 
-  // Errors clear themselves so the panda never stays stuck.
   useEffect(() => {
     if (state.status !== "error") return;
     const timer = setTimeout(() => dispatch({ type: "RESET" }), 5000);

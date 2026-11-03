@@ -1,5 +1,6 @@
 import { Suspense, lazy, useEffect, useRef, useState, type FormEvent } from "react";
-import type { Lang } from "../shared/protocol";
+import { LANGS, type Lang } from "../shared/protocol";
+import { BambooFrame } from "./scene/BambooFrame";
 import { useConversation } from "./state/useConversation";
 import { DebugPanel } from "./ui/DebugPanel";
 import { KeyboardIcon, LeafIcon, MicIcon, SendIcon } from "./ui/icons";
@@ -9,6 +10,9 @@ import { STRINGS } from "./ui/strings";
 // three.js is the heaviest part of the bundle; the UI shows while it loads.
 const Scene = lazy(() => import("./scene/Scene").then((m) => ({ default: m.Scene })));
 
+const LANG_LABEL: Record<Lang, string> = { en: "EN", fr: "FR", zh: "中" };
+const HTML_LANG: Record<Lang, string> = { en: "en", fr: "fr", zh: "zh-CN" };
+
 export function App() {
   const { state, lang, sttSupported, toggleMic, ask, interrupt, changeLang } = useConversation();
   const t = STRINGS[lang];
@@ -17,6 +21,10 @@ export function App() {
   const [showDebug, setShowDebug] = useState(false);
   const input = useRef<HTMLInputElement>(null);
 
+  useEffect(() => {
+    document.documentElement.lang = HTML_LANG[lang];
+  }, [lang]);
+
   const busy = state.status === "thinking" || state.status === "speaking";
   const onMic = () => (busy ? interrupt() : toggleMic());
 
@@ -24,7 +32,7 @@ export function App() {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.target instanceof HTMLInputElement || event.repeat) return;
-      if (event.code === "Space" && sttSupported) {
+      if (event.code === "Space" && sttSupported && !typing) {
         event.preventDefault();
         onMic();
       } else if (event.code === "Escape") {
@@ -39,9 +47,8 @@ export function App() {
 
   useEffect(() => {
     if (typing) input.current?.focus();
-  }, [typing]);
+  }, [typing, lang]);
 
-  // Long answers scroll inside the subtitle card; keep the latest words in view.
   const subtitles = useRef<HTMLElement>(null);
   useEffect(() => {
     subtitles.current?.scrollTo({ top: subtitles.current.scrollHeight });
@@ -64,6 +71,7 @@ export function App() {
           <Scene />
         </div>
       </Suspense>
+      <BambooFrame />
 
       <header className="topbar">
         <div className="brand">
@@ -75,10 +83,10 @@ export function App() {
             <p>{t.tagline}</p>
           </div>
         </div>
-        <div className="lang glass" role="group" aria-label="Language">
-          {(["en", "fr"] as Lang[]).map((code) => (
+        <div className="lang glass" role="group" aria-label={t.language}>
+          {LANGS.map((code) => (
             <button key={code} aria-pressed={lang === code} onClick={() => changeLang(code)}>
-              {code.toUpperCase()}
+              {LANG_LABEL[code]}
             </button>
           ))}
         </div>
@@ -106,7 +114,7 @@ export function App() {
           </section>
         ) : (
           state.status === "idle" && (
-            <ul className="suggestions" aria-label="Suggestions">
+            <ul className="suggestions" aria-label={t.suggestionsLabel}>
               {t.suggestions.map((s) => (
                 <li key={s}>
                   <button className="chip glass" onClick={() => ask(s)}>
@@ -151,7 +159,7 @@ export function App() {
                 maxLength={500}
                 aria-label={t.placeholder}
               />
-              <button type="submit" aria-label={t.send} disabled={!draft.trim()}>
+              <button type="submit" aria-label={t.send} disabled={!draft.trim() || busy}>
                 <SendIcon />
               </button>
             </form>

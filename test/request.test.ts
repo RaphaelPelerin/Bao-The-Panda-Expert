@@ -7,6 +7,18 @@ describe("parseRequest", () => {
     expect(req).toEqual({ question: "What do pandas eat?", lang: "fr", history: [] });
   });
 
+  it("accepts Mandarin", () => {
+    const req = parseRequest(JSON.stringify({ question: " 熊猫吃什么？ ", lang: "zh", history: [] }));
+    expect(req).toEqual({ question: "熊猫吃什么？", lang: "zh", history: [] });
+  });
+
+  it("ignores client region / model fields (server env owns those)", () => {
+    const req = parseRequest(
+      JSON.stringify({ question: "q", lang: "en", history: [], region: "deepseek", model: "gpt-4o" }),
+    );
+    expect(req).toEqual({ question: "q", lang: "en", history: [] });
+  });
+
   it("rejects missing or oversized questions", () => {
     expect(() => parseRequest(JSON.stringify({ question: "  " }))).toThrow();
     expect(() => parseRequest(JSON.stringify({ question: "x".repeat(501) }))).toThrow();

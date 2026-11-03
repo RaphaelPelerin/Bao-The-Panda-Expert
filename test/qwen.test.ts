@@ -1,9 +1,10 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { QWEN_MODEL } from "../shared/protocol";
 import { readVerdict } from "../server/guard";
-import { providerChain } from "../server/providers";
-import { qwenUnavailability, resolveQwenConfig, streamQwen, type QwenConfig } from "../server/providers/qwen";
+import { makeQwenProvider } from "../server/providers";
+import { qwenConfig, qwenUnavailability, streamQwen, type QwenConfig } from "../server/providers/qwen";
 
 // A tiny stand-in for Qwen's OpenAI-compatible endpoint: streams chat-completion chunks, or fails on demand.
 let server: Server;
@@ -54,7 +55,13 @@ afterAll(() => {
   server.close();
 });
 
-const config = (apiKey: string): QwenConfig => ({ name: "mock", apiKey, baseURL, model: "qwen-flash", extraBody: { enable_thinking: false } });
+const config = (apiKey: string): QwenConfig => ({
+  name: "qwen-intl",
+  apiKey,
+  baseURL,
+  model: QWEN_MODEL,
+  extraBody: { enable_thinking: false },
+});
 const request = { question: "What do pandas eat?", lang: "en" as const, history: [{ role: "user" as const, text: "Hi" }] };
 
 describe("Qwen provider", () => {
@@ -66,9 +73,9 @@ describe("Qwen provider", () => {
     expect(text).toBe("Bamboo, mostly bamboo!");
   });
 
-  it("sends the system prompt, history and question, with thinking off", async () => {
+  it("sends the locked model, system prompt, history and question, with thinking off", async () => {
     await readVerdict(streamQwen(config("good"), request, new AbortController().signal));
-    expect(lastBody?.model).toBe("qwen-flash");
+    expect(lastBody?.model).toBe(QWEN_MODEL);
     expect(lastBody?.messages.map((m) => m.role)).toEqual(["system", "user", "user"]);
     expect(lastBody?.messages[0].content).toContain("[OUT]");
     expect(lastBody?.messages.at(-1)?.content).toBe("What do pandas eat?");
@@ -91,14 +98,9 @@ describe("Qwen provider", () => {
   });
 });
 
-describe("provider configuration", () => {
-  it("is off without LLM_API_KEY, even with the video generation's OpenRouter key", () => {
-    expect(resolveQwenConfig({})).toBeNull();
-    expect(resolveQwenConfig({ OPENROUTER_API_KEY: "o" })).toBeNull();
-  });
-
-  it("uses Qwen Flash on the international endpoint, without thinking", () => {
-    expect(resolveQwenConfig({ LLM_API_KEY: "k" })).toMatchObject({
+describe("Qwen configuration", () => {
+  it("always uses qwen-flash-character on the international endpoint", () => {
+    expect(qwenConfig("k")).toMatchObject({
       name: "qwen-intl",
       baseURL: expect.stringContaining("dashscope-intl.aliyuncs.com"),
       model: "qwen-flash-character",
@@ -106,15 +108,13 @@ describe("provider configuration", () => {
     });
   });
 
-  it("supports the mainland China region and rejects anything else", () => {
-    expect(resolveQwenConfig({ LLM_API_KEY: "k", LLM_PROVIDER: "qwen" })?.baseURL).toContain("//dashscope.aliyuncs.com");
-    expect(() => resolveQwenConfig({ LLM_API_KEY: "k", LLM_PROVIDER: "deepseek" })).toThrow(/LLM_PROVIDER/);
+  it("supports the mainland China region only as a host switch", () => {
+    expect(qwenConfig("k", "qwen").baseURL).toContain("//dashscope.aliyuncs.com");
+    expect(qwenConfig("k", "qwen").model).toBe(QWEN_MODEL);
   });
 
-  it("falls back to offline in auto mode", () => {
-    expect(providerChain({ LLM_API_KEY: "k" }).chain.map((p) => p.name)).toEqual(["qwen-intl", "offline"]);
-    expect(providerChain({}).chain.map((p) => p.name)).toEqual(["offline"]);
-    expect(providerChain({ PANDA_PROVIDER: "offline", LLM_API_KEY: "k" }).chain.map((p) => p.name)).toEqual(["offline"]);
-    expect(providerChain({ PANDA_PROVIDER: "qwen", LLM_API_KEY: "k" }).chain.map((p) => p.name)).toEqual(["qwen-intl"]);
+  it("exposes a single locked provider (no offline chain)", () => {
+    const provider = makeQwenProvider("k", "qwen-intl");
+    expect(provider.name).toBe("qwen-intl");
   });
 });

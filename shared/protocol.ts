@@ -1,6 +1,22 @@
 // Wire format between the browser and /api/ask. Shared by client and server.
 
-export type Lang = "en" | "fr";
+export const LANGS = ["en", "fr", "zh"] as const;
+export type Lang = (typeof LANGS)[number];
+
+export function isLang(value: unknown): value is Lang {
+  return typeof value === "string" && (LANGS as readonly string[]).includes(value);
+}
+
+/** Fixed answer model — never taken from the client or env. */
+export const QWEN_MODEL = "qwen-flash-character" as const;
+
+/** DashScope endpoint region (account location). Does not change the model. */
+export const QWEN_REGIONS = ["qwen-intl", "qwen"] as const;
+export type QwenRegion = (typeof QWEN_REGIONS)[number];
+
+export function isQwenRegion(value: unknown): value is QwenRegion {
+  return typeof value === "string" && (QWEN_REGIONS as readonly string[]).includes(value);
+}
 
 export interface Turn {
   role: "user" | "assistant";

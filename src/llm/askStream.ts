@@ -2,7 +2,7 @@ import type { AskEvent, AskRequest } from "../../shared/protocol";
 
 /**
  * POSTs a question and calls onEvent for each server-sent event as it arrives.
- * Resolves when the stream ends; rejects on network errors (but not on abort).
+ * The Model Studio key stays on the server (Vercel / .env); the browser never sends it.
  */
 export async function askStream(
   request: AskRequest,
@@ -15,6 +15,9 @@ export async function askStream(
     body: JSON.stringify(request),
     signal,
   });
+  if (response.status === 503) {
+    throw new Error("missing-key");
+  }
   if (!response.ok || !response.body) {
     throw new Error(`Server answered ${response.status}`);
   }

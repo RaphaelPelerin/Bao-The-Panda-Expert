@@ -16,9 +16,24 @@ export async function* streamOffline(req: AskRequest, signal: AbortSignal): Asyn
   }
 
   yield `${TAG_IN} `;
-  for (const word of result.text.split(/(?<=\s)/)) {
+  for (const word of speakableChunks(result.text)) {
     if (signal.aborted) return;
     await new Promise((resolve) => setTimeout(resolve, WORD_DELAY_MS));
     yield word;
   }
+}
+
+/** Chinese has no spaces, so stream it by clause instead of one giant chunk. */
+function speakableChunks(text: string): string[] {
+  if (/\p{Script=Han}/u.test(text)) {
+    return text
+      .split(/(?<=[。！？，、；：])/)
+      .flatMap((part) => {
+        if (part.length <= 12) return part ? [part] : [];
+        const pieces: string[] = [];
+        for (let i = 0; i < part.length; i += 8) pieces.push(part.slice(i, i + 8));
+        return pieces;
+      });
+  }
+  return text.split(/(?<=\s)/).filter(Boolean);
 }

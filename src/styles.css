@@ -10,8 +10,8 @@
   --sun: #ffd892;
   --alert: #ff9b85;
   --shadow: 0 18px 50px rgba(10, 24, 10, 0.35);
-  --font-display: "Fredoka", "Nunito", system-ui, sans-serif;
-  --font-body: "Nunito", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: "Fredoka", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font-body: "Nunito", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, "Segoe UI", sans-serif;
   color-scheme: dark;
 }
 
@@ -68,14 +68,74 @@ button {
 .scene-loading {
   position: absolute;
   inset: 0;
-  /* Static backdrop: drop any picture at public/background.jpg; the gradient shows until then. */
+  z-index: 0;
+  /* Static backdrop: public/background.png; gradient shows until the file loads. */
   background:
-    url("/background.jpg") center / cover no-repeat,
+    url("/background.png") center / cover no-repeat,
     radial-gradient(ellipse at 55% 30%, #e3ead0, #9cbb93 50%, #4d6c45);
+}
+
+/* Side bamboo cutouts — sit above the backdrop, below chrome. */
+.bamboo-frame {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.bamboo {
+  position: absolute;
+  bottom: -18%;
+  height: min(155vh, 1400px);
+  width: auto;
+  max-width: none;
+  object-fit: contain;
+  user-select: none;
+  transform-origin: 50% 100%;
+  filter: drop-shadow(0 10px 18px rgba(20, 40, 18, 0.28));
+}
+
+.bamboo-left {
+  left: -14%;
+  animation: bamboo-sway-left 6.5s ease-in-out infinite;
+}
+
+.bamboo-right {
+  right: -14%;
+  transform: scaleX(-1);
+  animation: bamboo-sway-right 7.8s ease-in-out infinite;
+}
+
+@keyframes bamboo-sway-left {
+  0%,
+  100% {
+    transform: rotate(-1.6deg) translateX(0);
+  }
+  40% {
+    transform: rotate(2.2deg) translateX(6px);
+  }
+  70% {
+    transform: rotate(-0.8deg) translateX(-2px);
+  }
+}
+
+@keyframes bamboo-sway-right {
+  0%,
+  100% {
+    transform: scaleX(-1) rotate(1.4deg) translateX(0);
+  }
+  45% {
+    transform: scaleX(-1) rotate(-2.4deg) translateX(5px);
+  }
+  75% {
+    transform: scaleX(-1) rotate(0.6deg) translateX(-3px);
+  }
 }
 
 .topbar {
   position: relative;
+  z-index: 2;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -142,6 +202,7 @@ button {
 
 .dock {
   position: relative;
+  z-index: 2;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -421,10 +482,19 @@ button {
   cursor: default;
 }
 
+.ask.stop {
+  justify-content: center;
+  padding: 14px 28px;
+  font-weight: 700;
+  color: var(--ink);
+  cursor: pointer;
+}
+
 /* ---------- debug ---------- */
 
 .debug {
   position: absolute;
+  z-index: 3;
   left: 16px;
   bottom: 16px;
   padding: 12px 16px;
@@ -500,6 +570,25 @@ button {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
   }
+
+  .bamboo-left,
+  .bamboo-right {
+    animation: none;
+  }
+}
+
+@media (max-width: 900px) {
+  .bamboo {
+    height: min(145vh, 1100px);
+    bottom: -22%;
+    opacity: 0.95;
+  }
+  .bamboo-left {
+    left: -22%;
+  }
+  .bamboo-right {
+    right: -22%;
+  }
 }
 
 @media (max-width: 560px) {
@@ -515,5 +604,16 @@ button {
   .debug {
     bottom: auto;
     top: 76px;
+  }
+  .bamboo {
+    height: min(130vh, 900px);
+    bottom: -28%;
+    opacity: 0.85;
+  }
+  .bamboo-left {
+    left: -32%;
+  }
+  .bamboo-right {
+    right: -32%;
   }
 }

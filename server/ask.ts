@@ -2,32 +2,35 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import {
   MAX_HISTORY_TURNS,
   MAX_QUESTION_CHARS,
+  isLang,
+  isQwenRegion,
   type AskEvent,
   type AskRequest,
-  type Lang,
+  type QwenRegion,
   type Turn,
 } from "../shared/protocol";
-import { readVerdict, type GuardedStream } from "./guard";
+import { readVerdict } from "./guard";
 import { REFUSALS } from "./prompt";
-import { providerChain, type Provider } from "./providers";
+import { makeQwenProvider } from "./providers";
 
 try {
   process.loadEnvFile();
 } catch {
-  // No .env file: rely on the real environment.
+  // No .env: use the real environment (Vercel dashboard vars).
 }
 
 const MAX_BODY_BYTES = 16_000;
-const { mode: MODE, chain: PROVIDERS } = providerChain(process.env);
-console.log(`[ask] providers (${MODE}): ${PROVIDERS.map((p) => p.name).join(" → ")}`);
-
-// In auto mode, a provider with bad credentials or no network is skipped for
-// the rest of the server's life instead of failing every request.
-const disabled = new Set<Provider>();
 
 export async function handleAsk(req: IncomingMessage, res: ServerResponse): Promise<void> {
   if (req.method !== "POST") {
     res.writeHead(405, { Allow: "POST" }).end();
+    return;
+  }
+
+  const apiKey = serverApiKey();
+  if (!apiKey) {
+    res.writeHead(503, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "Server is missing LLM_API_KEY." }));
     return;
   }
 
@@ -48,7 +51,6 @@ export async function handleAsk(req: IncomingMessage, res: ServerResponse): Prom
   });
   const send = (event: AskEvent) => res.write(`data: ${JSON.stringify(event)}\n\n`);
 
-  // The client aborts its fetch when the user interrupts; stop generating right away.
   const abort = new AbortController();
   res.on("close", () => {
     if (!res.writableEnded) abort.abort();
@@ -56,17 +58,8 @@ export async function handleAsk(req: IncomingMessage, res: ServerResponse): Prom
 
   const started = performance.now();
   try {
-    const { guarded, provider } = await openGuardedStream(body, abort.signal);
-    send({ type: "verdict", inScope: guarded.verdict === "in", provider });
-    const verdictMs = Math.round(performance.now() - started);
-
-    if (guarded.verdict === "out") {
-      send({ type: "delta", text: REFUSALS[body.lang] });
-    } else {
-      for await (const text of guarded.rest) send({ type: "delta", text });
-    }
-    send({ type: "done" });
-    console.log(`[ask] ${provider} ${guarded.verdict} verdict=${verdictMs}ms total=${Math.round(performance.now() - started)}ms`);
+    await streamAsk(body, apiKey, abort.signal, send);
+    console.log(`[ask] total=${Math.round(performance.now() - started)}ms`);
   } catch (error) {
     if (abort.signal.aborted) {
       console.log("[ask] aborted by client");
@@ -79,27 +72,37 @@ export async function handleAsk(req: IncomingMessage, res: ServerResponse): Prom
   }
 }
 
-/**
- * Opens the first provider in the chain that answers. Failures only happen
- * before the verdict (the first tokens), so falling through is invisible to the user.
- */
-async function openGuardedStream(body: AskRequest, signal: AbortSignal): Promise<{ guarded: GuardedStream; provider: string }> {
-  const candidates = PROVIDERS.filter((p) => !disabled.has(p));
-  for (const [index, provider] of candidates.entries()) {
-    const isLast = index === candidates.length - 1;
-    try {
-      return { guarded: await readVerdict(provider.stream(body, signal)), provider: provider.name };
-    } catch (error) {
-      const unavailable = provider.unavailability(error);
-      if (MODE !== "auto" || isLast || !unavailable || signal.aborted) throw error;
-      if (unavailable === "permanent") disabled.add(provider);
-      console.warn(
-        `[ask] ${provider.name} unavailable (${unavailable}), trying the next provider:`,
-        error instanceof Error ? error.message : error,
-      );
-    }
+/** Streams ask events. Model is always qwen-flash-character; key/region from server env. */
+export async function streamAsk(
+  body: AskRequest,
+  apiKey: string,
+  signal: AbortSignal,
+  send: (event: AskEvent) => void,
+): Promise<void> {
+  const region = serverRegion();
+  const provider = makeQwenProvider(apiKey, region);
+  const started = performance.now();
+  const guarded = await readVerdict(provider.stream(body, signal));
+  send({ type: "verdict", inScope: guarded.verdict === "in", provider: provider.name });
+  const verdictMs = Math.round(performance.now() - started);
+
+  if (guarded.verdict === "out") {
+    send({ type: "delta", text: REFUSALS[body.lang] });
+  } else {
+    for await (const text of guarded.rest) send({ type: "delta", text });
   }
-  throw new Error("No provider available");
+  send({ type: "done" });
+  console.log(`[ask] ${provider.name} ${guarded.verdict} verdict=${verdictMs}ms`);
+}
+
+export function serverApiKey(): string | null {
+  const key = process.env.LLM_API_KEY?.trim();
+  return key || null;
+}
+
+export function serverRegion(): QwenRegion {
+  const raw = process.env.LLM_PROVIDER?.trim();
+  return isQwenRegion(raw) ? raw : "qwen-intl";
 }
 
 async function readBody(req: IncomingMessage): Promise<string> {
@@ -121,7 +124,7 @@ export function parseRequest(raw: string): AskRequest {
   if (typeof question !== "string" || !question.trim()) throw new Error("Missing question");
   if (question.length > MAX_QUESTION_CHARS) throw new Error("Question too long");
 
-  const safeLang: Lang = lang === "fr" ? "fr" : "en";
+  const safeLang = isLang(lang) ? lang : "en";
   const turns: Turn[] = Array.isArray(history)
     ? history
         .filter(
@@ -136,8 +139,11 @@ export function parseRequest(raw: string): AskRequest {
         .map((t) => ({ role: t.role, text: t.text.slice(0, 1000) }))
     : [];
 
-  // The API requires the conversation to start with a user turn.
   while (turns[0]?.role === "assistant") turns.shift();
 
-  return { question: question.trim(), lang: safeLang, history: turns };
+  return {
+    question: question.trim(),
+    lang: safeLang,
+    history: turns,
+  };
 }

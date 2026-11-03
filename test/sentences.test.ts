@@ -15,6 +15,10 @@ describe("SentenceChunker", () => {
     expect(chunker.flush()).toEqual(["Really?"]);
   });
 
+  it("splits Mandarin on Chinese punctuation without needing a space", () => {
+    expect(feed(["熊猫吃竹子。它们也", "睡觉！"])).toEqual(["熊猫吃竹子。", "它们也睡觉！"]);
+  });
+
   it("does not split decimal numbers", () => {
     expect(feed(["They weigh about 1.5 times more. Wow."])).toEqual(["They weigh about 1.5 times more.", "Wow."]);
   });

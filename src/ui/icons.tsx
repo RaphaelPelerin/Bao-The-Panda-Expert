@@ -32,3 +32,4 @@ export const LeafIcon = () => (
     <path d="M4 20l7-7" />
   </svg>
 );
+

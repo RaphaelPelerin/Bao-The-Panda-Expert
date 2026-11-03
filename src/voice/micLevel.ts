@@ -17,10 +17,8 @@ export class MicLevel {
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
     } catch {
-      // Recognition reports permission problems itself; the scene just stays calm.
       return;
     }
-    // stop() ran while the permission prompt was open.
     if (session !== this.session) {
       stream.getTracks().forEach((t) => t.stop());
       return;
@@ -37,7 +35,6 @@ export class MicLevel {
       let sum = 0;
       for (const s of samples) sum += s * s;
       const rms = Math.sqrt(sum / samples.length);
-      // Map speech levels (about 0.01 to 0.2 RMS) onto 0..1, rising fast and falling slowly.
       const level = Math.min(1, Math.max(0, (Math.log10(rms + 1e-4) + 2.2) / 1.5));
       signals.micLevel += (level - signals.micLevel) * (level > signals.micLevel ? 0.5 : 0.12);
       this.frame = requestAnimationFrame(tick);

@@ -143,6 +143,8 @@ const RULES: Record<Lang, Rule[]> = {
     ["ç", ["SS"]],
     ["j", ["CH"]],
   ],
+  // Latin words mixed into Mandarin ("Bao", "Jia Jia") use the English letter rules.
+  zh: [],
 };
 
 const CONSONANTS: Record<string, Viseme> = {
@@ -168,8 +170,26 @@ const CONSONANTS: Record<string, Viseme> = {
   w: "U",
 };
 
-const WORD = /[\p{L}\p{N}'’]+/gu;
-const PAUSE = /[,;:]|[.!?…]+/g;
+// Han is also a letter, so it has to be tried one character at a time before a whole word run.
+const WORD = /\p{Script=Han}|[\p{L}\p{N}'’]+/gu;
+const PAUSE = /[,;:，、；：]|[.!?…。！？]+/g;
+
+const HAN_SHAPES: Viseme[][] = [
+  ["PP", "aa"],
+  ["DD", "E"],
+  ["kk", "O"],
+  ["CH", "I"],
+  ["SS", "aa"],
+  ["DD", "U"],
+  ["CH", "U"],
+  ["PP", "O"],
+  ["kk", "aa"],
+  ["DD", "aa"],
+  ["SS", "I"],
+  ["RR", "O"],
+  ["FF", "E"],
+  ["PP", "U"],
+];
 
 /** Splits an utterance into words and pauses, each with its mouth shapes. */
 export function tokenize(text: string, lang: Lang): Token[] {
@@ -184,9 +204,10 @@ export function tokenize(text: string, lang: Lang): Token[] {
 
 /** Grapheme rules, good enough to drive a cartoon mouth (not a phonetic transcription). */
 export function wordVisemes(word: string, lang: Lang): Viseme[] {
+  if ([...word].every(isHan)) return [...word].flatMap(hanVisemes);
   const w = word.toLowerCase().replace(/['’]/g, "");
   if (/^\d+$/.test(w)) return digitsVisemes(w.length);
-  const rules = RULES[lang];
+  const rules = lang === "zh" ? RULES.en : RULES[lang];
   const out: Viseme[] = [];
   let i = 0;
   while (i < w.length) {
@@ -210,6 +231,16 @@ export function wordVisemes(word: string, lang: Lang): Viseme[] {
     i++;
   }
   return out.length ? out : ["ah"];
+}
+
+function isHan(ch: string): boolean {
+  const code = ch.codePointAt(0) ?? 0;
+  return code >= 0x4e00 && code <= 0x9fff;
+}
+
+function hanVisemes(ch: string): Viseme[] {
+  const code = ch.codePointAt(0) ?? 0;
+  return HAN_SHAPES[code % HAN_SHAPES.length];
 }
 
 function isVowel(v: Viseme): boolean {
