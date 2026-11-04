@@ -2,8 +2,9 @@ import { createServer } from "node:http";
 import { readFile, stat } from "node:fs/promises";
 import { extname, join, normalize, resolve } from "node:path";
 import { handleAsk } from "./ask.js";
+import { handleTts } from "./tts.js";
 
-// Production server: serves the built app from dist/ and the /api/ask endpoint.
+// Production server: serves the built app from dist/ and the API endpoints.
 // In development, vite.config.ts mounts the same handler instead.
 
 const DIST = resolve("dist");
@@ -12,7 +13,7 @@ const PORT = Number(process.env.PORT) || 8787;
 const TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript",
-  // Browsers reject WebAssembly streaming without this type, which breaks Piper's phonemizer.
+  // Browsers reject WebAssembly streaming without this type.
   ".wasm": "application/wasm",
   ".css": "text/css",
   ".svg": "image/svg+xml",
@@ -27,6 +28,7 @@ const TYPES: Record<string, string> = {
 createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", "http://localhost");
   if (url.pathname === "/api/ask") return handleAsk(req, res);
+  if (url.pathname === "/api/tts") return handleTts(req, res);
 
   // Resolve inside dist/ only, falling back to index.html.
   const requested = normalize(join(DIST, decodeURIComponent(url.pathname)));

@@ -56,6 +56,11 @@ class LipSync {
     this.speaking = true;
   }
 
+  /** The utterance's real length became known after it started: keep the mouth on it. */
+  stretchTo(durationMs: number): void {
+    if (this.speaking && this.total > 0) this.msPerUnit = durationMs / this.total;
+  }
+
   /** A word boundary event: the word at `charIndex` starts now. */
   boundary(charIndex: number): void {
     if (!this.speaking || !this.words.length) return;

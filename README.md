@@ -41,7 +41,7 @@ Visitors never enter a key — the server uses `LLM_API_KEY`.
    - `LLM_PROVIDER` — `qwen-intl` (default) or `qwen` for mainland China
 3. Deploy. Users open the site and talk — no key in the browser.
 
-The only serverless route is `api/ask.ts`. Speech (Whisper STT + Piper TTS) runs **100% in the browser**, free, with no speech API.
+Serverless routes: `api/ask.ts` (answers) and `api/tts.ts` (voice), both with `LLM_API_KEY`. Speech recognition (Whisper) runs in the browser.
 
 ---
 
@@ -53,7 +53,7 @@ flowchart LR
     Mic["Mic → Whisper tiny\n(hf-mirror / HF, cached)"] --> Hook
     Type["Type / suggestions"] --> Hook
     Hook["useConversation\nstate machine"] --> SSE["askStream SSE"]
-    Hook --> TTS["Piper TTS worker\n(falls back to local voices)"]
+    Hook --> TTS["/api/tts stream\n(falls back to local voices)"]
     Hook --> Avatar["three.js panda + bamboo"]
     TTS --> Avatar
   end
@@ -75,7 +75,7 @@ flowchart LR
 2. `POST /api/ask` (no browser secret)
 3. Server streams `qwen-flash-character` with env key; first tokens `[IN]` / `[OUT]`
 4. Out of scope → coded refusal
-5. In scope → sentence chunker → Piper TTS (worker) → avatar via `signals`
+5. In scope → sentence chunker → `/api/tts` (Alibaba `qwen-audio-3.1-tts-flash`, streamed PCM) → avatar via `signals`
 
 ---
 
@@ -86,7 +86,7 @@ api/ask.ts           Vercel serverless answers (env key)
 server/              ask handler, topic guard, Qwen client
 shared/protocol.ts   types + locked QWEN_MODEL
 src/state/           conversation state machine + hook
-src/voice/           Whisper STT and Piper TTS (client), local voice fallback
+src/voice/           Whisper STT (client), streamed TTS player, local voice fallback
 src/avatar/          panda cutout, shader, lip cues
 src/scene/           WebGL canvas + swaying bamboo
 src/ui/              mic, strings (EN / FR / 中)
@@ -130,7 +130,7 @@ DISCUSSION.md        assignment follow-up Q1–Q6
 ## Limits
 
 - The mouth follows a viseme timeline stretched to the audio's exact length, not the waveform.
-- The first visit downloads the voice (about 60 MB per language) from hf-mirror (then Hugging Face) into browser storage. Until then, answers use a local voice, or stay silent with a notice.
-- Bao's voice is male in English (`en_US-hfc_male`) and French (`fr_FR-tom`). Chinese has no male voice this engine can run: it uses a local male voice if the computer has one, otherwise Huayan, a female voice.
+- Bao's voice is `xunanchuan_v3.1`, male, with a slightly raised pitch and a "cartoon panda" style instruction. Each sentence is billed to the Model Studio account (about $0.0001 for two sentences); requests are capped in length, but nothing limits how many a visitor can send.
+- If the voice service fails, answers use a local voice, or stay silent with a notice.
 - First mic use downloads Whisper tiny from hf-mirror (then Hugging Face) into the browser cache.
 - Local fallback voices never include Google/Online cloud voices.

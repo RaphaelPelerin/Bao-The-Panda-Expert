@@ -2,7 +2,7 @@ import { defineConfig } from "vitest/config";
 import type { Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 
-// Mounts the /api/ask endpoint inside the Vite dev server, so `npm run dev`
+// Mounts the API endpoints inside the Vite dev server, so `npm run dev`
 // runs front and back in one process, with hot reload of the server code too.
 // Production uses server/index.ts.
 function pandaApi(): Plugin {
@@ -13,6 +13,12 @@ function pandaApi(): Plugin {
         server
           .ssrLoadModule("/server/ask.ts")
           .then((mod) => (mod as typeof import("./server/ask")).handleAsk(req, res))
+          .catch(next);
+      });
+      server.middlewares.use("/api/tts", (req, res, next) => {
+        server
+          .ssrLoadModule("/server/tts.ts")
+          .then((mod) => (mod as typeof import("./server/tts")).handleTts(req, res))
           .catch(next);
       });
     },

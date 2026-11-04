@@ -5,6 +5,9 @@
   "functions": {
     "api/ask.ts": {
       "maxDuration": 60
+    },
+    "api/tts.ts": {
+      "maxDuration": 30
     }
   },
   "rewrites": [

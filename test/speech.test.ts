@@ -1,23 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { LANGS } from "../shared/protocol";
+import { audioFromEventLine, MAX_TTS_CHARS, parseTtsRequest, speechBody } from "../server/tts";
 import { isCloudVoice } from "../src/voice/tts";
-import { chooseEngine, isMaleVoiceName, PIPER_VOICES, voiceNotice } from "../src/voice/voiceStatus";
+import { decodePcm, isMaleVoiceName } from "../src/voice/voiceStatus";
 import { prepareAudio, resample } from "../src/voice/wav";
 
 describe("voice selection", () => {
-  it("prefers Piper, then a local voice, then silence", () => {
-    expect(chooseEngine("en", true, "Microsoft David")).toBe("piper");
-    expect(chooseEngine("en", true, null)).toBe("piper");
-    expect(chooseEngine("en", false, "Microsoft David")).toBe("local");
-    expect(chooseEngine("en", false, null)).toBe("silent");
-  });
-
-  it("keeps Bao male in Chinese, where the Piper voice is female", () => {
-    expect(chooseEngine("zh", true, "Microsoft Kangkang")).toBe("local");
-    expect(chooseEngine("zh", true, "Microsoft Huihui")).toBe("piper");
-    expect(chooseEngine("zh", true, null)).toBe("piper");
-  });
-
   it("recognizes male local voices by name", () => {
     expect(isMaleVoiceName("Microsoft Paul - French (France)")).toBe(true);
     expect(isMaleVoiceName("Microsoft David - English (United States)")).toBe(true);
@@ -25,17 +12,35 @@ describe("voice selection", () => {
     expect(isMaleVoiceName("Microsoft Julie - French (France)")).toBe(false);
   });
 
-  it("only warns when answers would be silent", () => {
-    expect(voiceNotice({ state: "ready" }, false)).toBeNull();
-    expect(voiceNotice({ state: "loading", percent: 40 }, true)).toBeNull();
-    expect(voiceNotice({ state: "failed" }, true)).toBeNull();
-    expect(voiceNotice({ state: "loading", percent: 40 }, false)).toEqual({ kind: "loading", percent: 40 });
-    expect(voiceNotice({ state: "idle" }, false)).toEqual({ kind: "loading", percent: 0 });
-    expect(voiceNotice({ state: "failed" }, false)).toEqual({ kind: "none" });
+  it("decodes PCM and keeps a byte split across chunks", () => {
+    const { samples, leftover } = decodePcm(new Uint8Array([0x00, 0x40, 0x00, 0xc0, 0x7f]));
+    expect([...samples]).toEqual([0.5, -0.5]);
+    expect([...leftover]).toEqual([0x7f]);
+  });
+});
+
+describe("speech route", () => {
+  it("validates requests and caps their length", () => {
+    expect(parseTtsRequest(JSON.stringify({ text: " Hi ", lang: "fr" }))).toEqual({ text: "Hi", lang: "fr" });
+    expect(parseTtsRequest(JSON.stringify({ text: "Hi", lang: "xx" })).lang).toBe("en");
+    expect(() => parseTtsRequest(JSON.stringify({ text: " " }))).toThrow();
+    expect(() => parseTtsRequest(JSON.stringify({ text: "x".repeat(MAX_TTS_CHARS + 1) }))).toThrow();
   });
 
-  it("has a Piper voice for every language", () => {
-    for (const lang of LANGS) expect(PIPER_VOICES[lang]).toMatch(/^[a-z]{2}_[A-Z]{2}-/);
+  it("asks for the panda voice in the right language", () => {
+    const { input } = speechBody("Bonjour", "fr");
+    expect(input.voice).toBe("xunanchuan_v3.1");
+    expect(input.language_hints).toEqual(["fr"]);
+    expect(input.instruction).toContain("panda");
+    expect(input.format).toBe("pcm");
+  });
+
+  it("reads audio from the provider's events and surfaces its errors", () => {
+    const audio = Buffer.from([1, 2, 3]).toString("base64");
+    expect([...audioFromEventLine(`data:{"output":{"audio":{"data":"${audio}"}}}`)!]).toEqual([1, 2, 3]);
+    expect(audioFromEventLine("event:result")).toBeNull();
+    expect(audioFromEventLine(`data:{"output":{"audio":{"data":""}}}`)).toBeNull();
+    expect(() => audioFromEventLine(`data:{"code":"Throttling","message":"slow down"}`)).toThrow("Throttling");
   });
 });
 

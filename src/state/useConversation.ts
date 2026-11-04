@@ -7,7 +7,6 @@ import { SentenceChunker } from "../llm/sentences";
 import { MicLevel } from "../voice/micLevel";
 import { SpeechInput, isSttSupported, type SttErrorKind } from "../voice/stt";
 import { SpeechOutput } from "../voice/tts";
-import type { VoiceNotice } from "../voice/voiceStatus";
 import { initialState, reduce } from "./machine";
 import { metrics } from "./metrics";
 
@@ -44,12 +43,12 @@ const SERVER_KEY_MISSING: Record<Lang, string> = {
 
 /**
  * Orchestrates one conversation: mic (on-device Whisper) or typed question →
- * /api/ask stream → sentence queue → on-device text-to-speech.
+ * /api/ask stream → sentence queue → streamed text-to-speech.
  */
 export function useConversation() {
   const [state, dispatch] = useReducer(reduce, initialState);
   const [lang, setLang] = useState<Lang>("en");
-  const [voiceNotice, setVoiceNotice] = useState<VoiceNotice>(null);
+  const [noVoice, setNoVoice] = useState(false);
   const langRef = useRef(lang);
   const history = useRef<Turn[]>([]);
   const request = useRef<AbortController | null>(null);
@@ -90,7 +89,7 @@ export function useConversation() {
           pending.current = null;
           dispatch({ type: "SPEECH_END" });
         },
-        onNotice: setVoiceNotice,
+        onNoVoice: () => setNoVoice(true),
       }),
     };
   }
@@ -197,16 +196,10 @@ export function useConversation() {
 
   useEffect(() => interrupt, [interrupt]);
 
-  // Fetch the neural voice soon after load, so the first answer can already use it.
-  useEffect(() => {
-    const timer = setTimeout(() => tts.preload(), 1500);
-    return () => clearTimeout(timer);
-  }, [tts]);
-
   return {
     state,
     lang,
-    voiceNotice,
+    noVoice,
     sttSupported: isSttSupported(),
     toggleMic,
     ask,
