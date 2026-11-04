@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="960" height="520" viewBox="0 0 960 520" role="img" aria-labelledby="title desc">
   <title id="title">Bao architecture</title>
-  <desc id="desc">Voice or typed question flows through the browser state machine to /api/ask, Qwen Flash Character, then back as SSE for TTS and avatar animation.</desc>
+  <desc id="desc">A voice or typed question goes through the browser state machine to /api/ask, which streams a topic-guarded answer from Qwen. Each sentence then goes to /api/tts, which streams audio from Alibaba's TTS, and that drives the avatar. API keys stay on the server.</desc>
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0%" stop-color="#e8f0dc"/>
@@ -9,69 +9,96 @@
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
       <path d="M0 0 L10 5 L0 10 z" fill="#3d5c36"/>
     </marker>
+    <marker id="arrow-back" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#c9a05a"/>
+    </marker>
     <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
       <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#1a3318" flood-opacity="0.18"/>
     </filter>
+    <style>
+      text { font-family: "Segoe UI", Helvetica, Arial, sans-serif; fill: #24401f; }
+      .column { font-size: 18px; font-weight: 700; text-anchor: middle; }
+      .name { font-size: 14px; font-weight: 700; text-anchor: middle; }
+      .note { font-size: 11px; fill: #3d5c36; text-anchor: middle; }
+      .flow { font-size: 11px; font-weight: 600; fill: #3d5c36; text-anchor: middle; }
+      .flow-back { font-size: 11px; font-weight: 600; fill: #8a6b2e; text-anchor: middle; }
+    </style>
   </defs>
 
   <rect width="960" height="520" rx="18" fill="url(#bg)"/>
 
   <!-- Browser column -->
-  <rect x="28" y="36" width="420" height="448" rx="16" fill="#f7faf2" stroke="#6f9458" stroke-width="1.5" filter="url(#shadow)"/>
-  <text x="238" y="68" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="18" font-weight="700" fill="#24401f">Browser</text>
+  <rect x="28" y="36" width="384" height="448" rx="16" fill="#f7faf2" stroke="#6f9458" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="220" y="66" class="column">Browser</text>
 
-  <rect x="56" y="92" width="168" height="56" rx="12" fill="#dff0c8" stroke="#5d9a3a"/>
-  <text x="140" y="116" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#24401f">Mic ’ Whisper</text>
-  <text x="140" y="134" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#3d5c36">on-device STT</text>
+  <rect x="52" y="84" width="160" height="56" rx="12" fill="#dff0c8" stroke="#5d9a3a"/>
+  <text x="132" y="108" class="name">Mic â†’ Whisper</text>
+  <text x="132" y="126" class="note">on-device STT, hosted here</text>
 
-  <rect x="252" y="92" width="168" height="56" rx="12" fill="#dff0c8" stroke="#5d9a3a"/>
-  <text x="336" y="116" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#24401f">Type / suggest</text>
-  <text x="336" y="134" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#3d5c36">optional fallback</text>
+  <rect x="228" y="84" width="160" height="56" rx="12" fill="#dff0c8" stroke="#5d9a3a"/>
+  <text x="308" y="108" class="name">Type / suggestions</text>
+  <text x="308" y="126" class="note">optional fallback</text>
 
-  <rect x="56" y="188" width="364" height="64" rx="12" fill="#cfe8b0" stroke="#4d6c45"/>
-  <text x="238" y="216" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="14" font-weight="700" fill="#24401f">useConversation + state machine</text>
-  <text x="238" y="236" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#3d5c36">idle ’ listening ’ thinking ’ speaking ’ idle</text>
+  <rect x="52" y="168" width="336" height="56" rx="12" fill="#cfe8b0" stroke="#4d6c45"/>
+  <text x="220" y="192" class="name">useConversation + state machine</text>
+  <text x="220" y="210" class="note">idle â†’ listening â†’ thinking â†’ speaking â†’ idle</text>
 
-  <rect x="56" y="288" width="168" height="56" rx="12" fill="#fff3d6" stroke="#c9a05a"/>
-  <text x="140" y="312" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#24401f">askStream (SSE)</text>
-  <text x="140" y="330" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#3d5c36">+ Bearer API key</text>
+  <rect x="52" y="252" width="336" height="56" rx="12" fill="#fff3d6" stroke="#c9a05a"/>
+  <text x="220" y="276" class="name">askStream + sentence chunker</text>
+  <text x="220" y="294" class="note">reads the answer as it streams, no key in the browser</text>
 
-  <rect x="252" y="288" width="168" height="56" rx="12" fill="#dff0c8" stroke="#5d9a3a"/>
-  <text x="336" y="312" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#24401f">Local TTS</text>
-  <text x="336" y="330" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#3d5c36">speechSynthesis</text>
+  <rect x="52" y="336" width="336" height="56" rx="12" fill="#dff0c8" stroke="#5d9a3a"/>
+  <text x="220" y="360" class="name">Speech player (Web Audio)</text>
+  <text x="220" y="378" class="note">gapless queue, falls back to a local voice</text>
 
-  <rect x="56" y="384" width="364" height="64" rx="12" fill="#b9d99a" stroke="#4d6c45"/>
-  <text x="238" y="412" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="14" font-weight="700" fill="#24401f">three.js avatar + bamboo</text>
-  <text x="238" y="432" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#3d5c36">signals drive mouth / pose each frame</text>
+  <rect x="52" y="420" width="336" height="48" rx="12" fill="#b9d99a" stroke="#4d6c45"/>
+  <text x="220" y="440" class="name">three.js avatar: idle, think, talk clips</text>
+  <text x="220" y="457" class="note">cross-faded in the shader, lip-synced mouth</text>
 
   <!-- Server column -->
-  <rect x="512" y="36" width="420" height="448" rx="16" fill="#f7faf2" stroke="#6f9458" stroke-width="1.5" filter="url(#shadow)"/>
-  <text x="722" y="68" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="18" font-weight="700" fill="#24401f">Server (Vite / Vercel)</text>
+  <rect x="548" y="36" width="384" height="448" rx="16" fill="#f7faf2" stroke="#6f9458" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="740" y="66" class="column">Server (Vercel functions)</text>
 
-  <rect x="540" y="108" width="364" height="72" rx="12" fill="#fff3d6" stroke="#c9a05a"/>
-  <text x="722" y="138" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="14" font-weight="700" fill="#24401f">POST /api/ask</text>
-  <text x="722" y="158" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#3d5c36">Authorization: Bearer &lt;browser key&gt;</text>
+  <rect x="572" y="84" width="336" height="56" rx="12" fill="#fff3d6" stroke="#c9a05a"/>
+  <text x="740" y="108" class="name">POST /api/ask</text>
+  <text x="740" y="126" class="note">LLM_API_KEY from env, daily question limit</text>
 
-  <rect x="540" y="220" width="364" height="72" rx="12" fill="#cfe8b0" stroke="#4d6c45"/>
-  <text x="722" y="250" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="14" font-weight="700" fill="#24401f">Topic guard [IN] / [OUT]</text>
-  <text x="722" y="270" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#3d5c36">fail closed ’ coded refusal if out of scope</text>
+  <rect x="572" y="164" width="336" height="56" rx="12" fill="#cfe8b0" stroke="#4d6c45"/>
+  <text x="740" y="188" class="name">Topic guard [IN] / [OUT]</text>
+  <text x="740" y="206" class="note">fails closed: coded refusal if out of scope</text>
 
-  <rect x="540" y="332" width="364" height="88" rx="12" fill="#a6dd72" stroke="#4d6c45"/>
-  <text x="722" y="366" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="14" font-weight="700" fill="#18351a">qwen-flash-character only</text>
-  <text x="722" y="388" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#24401f">DashScope · thinking off · locked model</text>
-  <text x="722" y="406" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="#24401f">streamed SSE deltas</text>
+  <rect x="572" y="244" width="336" height="56" rx="12" fill="#a6dd72" stroke="#4d6c45"/>
+  <text x="740" y="268" class="name">qwen-flash-character only</text>
+  <text x="740" y="286" class="note">DashScope, streamed text deltas</text>
 
-  <!-- Arrows -->
-  <path d="M140 148 L140 188" stroke="#3d5c36" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
-  <path d="M336 148 L336 188" stroke="#3d5c36" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
-  <path d="M140 252 L140 288" stroke="#3d5c36" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
-  <path d="M336 252 L336 288" stroke="#3d5c36" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
-  <path d="M238 348 L238 384" stroke="#3d5c36" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
-  <path d="M420 316 L540 144" stroke="#3d5c36" stroke-width="2.5" fill="none" marker-end="url(#arrow)"/>
-  <path d="M540 180 L420 316" stroke="#c9a05a" stroke-width="2.5" fill="none" marker-end="url(#arrow)" stroke-dasharray="6 4"/>
-  <path d="M722 180 L722 220" stroke="#3d5c36" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
-  <path d="M722 292 L722 332" stroke="#3d5c36" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+  <rect x="572" y="336" width="336" height="56" rx="12" fill="#fff3d6" stroke="#c9a05a"/>
+  <text x="740" y="360" class="name">POST /api/tts</text>
+  <text x="740" y="378" class="note">same key on the server, one sentence at a time</text>
 
-  <text x="470" y="250" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="600" fill="#3d5c36">question</text>
-  <text x="478" y="290" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="11" font-weight="600" fill="#8a6b2e">answer SSE</text>
+  <rect x="572" y="420" width="336" height="48" rx="12" fill="#a6dd72" stroke="#4d6c45"/>
+  <text x="740" y="440" class="name">qwen-audio-3.1-tts-flash</text>
+  <text x="740" y="457" class="note">Alibaba TTS, streamed 24 kHz PCM</text>
+
+  <!-- Browser arrows -->
+  <path d="M132 140 L132 168" stroke="#3d5c36" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+  <path d="M308 140 L308 168" stroke="#3d5c36" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+  <path d="M220 224 L220 252" stroke="#3d5c36" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+  <path d="M220 308 L220 336" stroke="#3d5c36" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+  <path d="M220 392 L220 420" stroke="#3d5c36" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+
+  <!-- Server arrows -->
+  <path d="M740 140 L740 164" stroke="#3d5c36" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+  <path d="M740 220 L740 244" stroke="#3d5c36" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+  <path d="M740 392 L740 420" stroke="#3d5c36" stroke-width="2" fill="none" marker-end="url(#arrow)"/>
+
+  <!-- Between browser and server -->
+  <path d="M388 268 L572 104" stroke="#3d5c36" stroke-width="2.5" fill="none" marker-end="url(#arrow)"/>
+  <path d="M572 124 L388 288" stroke="#c9a05a" stroke-width="2.5" fill="none" marker-end="url(#arrow-back)" stroke-dasharray="6 4"/>
+  <path d="M388 352 L572 352" stroke="#3d5c36" stroke-width="2.5" fill="none" marker-end="url(#arrow)"/>
+  <path d="M572 376 L388 376" stroke="#c9a05a" stroke-width="2.5" fill="none" marker-end="url(#arrow-back)" stroke-dasharray="6 4"/>
+
+  <text x="456" y="176" class="flow">question</text>
+  <text x="510" y="232" class="flow-back">answer (SSE)</text>
+  <text x="480" y="344" class="flow">each sentence</text>
+  <text x="480" y="393" class="flow-back">audio stream</text>
 </svg>

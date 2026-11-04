@@ -4,32 +4,40 @@ Answers to the follow-up questions, tied to the code where the current version a
 
 ## Q1. Lip synchronization
 
-**Today**: `mouthOpenness()` in `src/avatar/signals.ts` combines `SpeechSynthesisUtterance` word-boundary events with a syllable-rate oscillation, and the panda shader opens the jaw by warping the area under the upper lip. It reads as talking, but it isn't synced to sounds.
+**Today**: Bao's voice is PCM audio streamed from Alibaba's TTS (`server/tts.ts`) and played through Web Audio. That API returns audio but no timing, so the app builds its own:
 
-To sync for real, I'd move synthesis to a TTS API that returns audio and timing, then pick one of three levels:
+- `src/avatar/visemes.ts` turns each sentence into mouth shapes, with rules per language.
+- `src/avatar/lipsync.ts` lays them on a timeline, then stretches it to the sentence's exact audio length once all of its audio has arrived.
+- The panda shader pastes real mouths cut from the talk clip (`public/lipsync/`, built by `npm run lipsync`) at the position the mouth has on the current video frame.
 
-1. **Amplitude (cheap, robust).** Play the audio through Web Audio, read the RMS level with an `AnalyserNode` (the same code as `MicLevel`), and drive `uMouth` from it. Every TTS provider supports this, and it's already a clear improvement.
-2. **Visemes (accurate).** Ask the TTS for phoneme or viseme timestamps:
+It reads as speech, but it isn't exact: the pace inside a sentence is estimated, and the timeline runs on `performance.now()`, not the audio clock.
+
+To tighten it, there are three levels:
+
+1. **Amplitude (cheap, robust).** Read the RMS level of the playing audio with an `AnalyserNode` (the same code as `MicLevel`) and use it to scale the mouth's opening, so pauses and loud syllables match the sound.
+2. **Visemes from the TTS (accurate).** Use a provider that returns phoneme or viseme timestamps:
    - Azure gives viseme events.
    - Polly gives speech marks.
    - ElevenLabs gives character alignment, which a grapheme-to-phoneme step converts to visemes.
 
-   Then schedule the mouth shapes against `AudioContext.currentTime`, not wall-clock time, so they can't drift. With video or sprites that means about 8 to 12 mouth shapes. With a 3D rig it means blendshape weights, blended over roughly 60 ms.
+   Then schedule the existing mouth shapes against `AudioContext.currentTime`, not wall-clock time, so they can't drift.
 3. **Generative (best looking, highest latency).** Run the audio and the avatar video through a lip-sync model (Sync Labs, Hedra, MuseTalk). It isn't real-time today unless you stream short chunks from a GPU server.
 
 In all three cases audio becomes the master clock, and the avatar reads its position every frame.
 
 ## Q2. Real-time latency (4 seconds is too slow)
 
-**Measure first.** The latency panel (press D) already timestamps each step from the moment the question is final: topic verdict, first text, first audio, answer complete. The server also logs time-to-verdict and total time per request. A 4-second delay usually breaks down like this:
+**Measure first.** The latency panel (press D) timestamps each step from the moment the question is final: topic verdict, first text, first audio, answer complete. The server also logs time-to-verdict and total time per request. The panel starts after transcription, so my first change would be adding marks for end of speech and end of transcription; otherwise the likely bottleneck stays invisible.
 
-| Step | Typical | How to reduce it |
+Here is where the time goes in this app. The measurements come from a few one-off tests on one PC, so they show the order of magnitude, not a benchmark:
+
+| Step | In this app | How to reduce it |
 |---|---|---|
-| End-of-speech detection | 0.5–1.5 s | Browser STT waits for silence. Use a streaming STT (Deepgram, AssemblyAI, Whisper streaming) with a tuned endpointing threshold (~400 ms), or a voice activity detector (VAD) in the client. |
-| Speech-to-text finalization | 0.2–0.6 s | Use the streaming partials and start the request on a confident partial, then confirm or cancel. |
-| Model time-to-first-token | 0.8–1.7 s | A fast model with thinking off (Qwen Flash, as today), a short prompt, prompt caching once the prompt is long enough, and a warm keep-alive connection. |
-| Waiting for the full answer | 1–3 s | Already solved here: sentence streaming into TTS. |
-| TTS time-to-first-audio | 0.2–1 s | A streaming TTS (audio chunks over WebSocket), with the first sentence kept short. The chunker already cuts long first sentences at a comma. |
+| End-of-speech detection | 0.9 s of silence (`SILENCE_MS` in `src/voice/stt.ts`) | Lower the threshold, or use a proper voice activity detector (VAD) so it can be shorter without cutting people off. |
+| Speech-to-text | About 3–6 s for 2–3 s of audio with Whisper tiny on the CPU, measured in a background window, so possibly pessimistic. **The likely bottleneck.** | Use WebGPU where available and move Whisper to a Web Worker, which also stops it freezing the avatar. For a large gain, use a streaming STT service (Deepgram, AssemblyAI) with partials, at the cost of a paid API and a third-party dependency. |
+| Model answer | About 1.5 s for a whole short answer in one live test | A fast model with thinking off (as today), a short prompt, and prompt caching once the prompt is long enough. |
+| Waiting for the full answer | None | Already solved: sentences go to TTS as they arrive. |
+| TTS time-to-first-audio | About 0.4 s from my machine, 1.7 s on one live request | Keep the first sentence short (the chunker already cuts long ones at a comma) and keep the function warm. |
 
 Perceived latency matters as much as real latency. The panda switches to "thinking" right away and shows the question as a caption. A short filler line such as "Hmm, good question…" could also play from a cached clip while the model starts.
 
@@ -41,19 +49,18 @@ The current version already speaks before the model finishes:
 2. `SentenceChunker` (`src/llm/sentences.ts`) emits each complete sentence, and long ones at a comma.
 3. `SpeechOutput` (`src/voice/tts.ts`) keeps a queue: sentence 1 plays while sentences 2 and 3 are still being generated. `finish()` marks the end so the state machine leaves "speaking" only after the last sentence.
 
-With an audio TTS API, the next step is to stream the TTS too: send each sentence as soon as it's chunked, play the returned audio buffers back to back with Web Audio, and pre-fetch sentence n+1 while sentence n plays.
+The TTS streams too. Each sentence goes to `/api/tts` as soon as it's chunked, so sentence n+1 is already being fetched while sentence n plays. Its PCM chunks are scheduled back to back with Web Audio as they arrive, so playback starts before a sentence's audio has fully arrived.
 
 ## Q4. Interruption handling
 
-**Today**: pressing the mic (or Space) while Bao is thinking or talking calls `interrupt()`:
+**Today**: pressing the mic (or Space, or Esc) while Bao is thinking or talking calls `interrupt()`:
 
 - the `fetch` is aborted, and the server sees the closed connection and aborts the Qwen stream, so tokens stop being generated and billed;
-- the speech queue is reset;
-- recognition restarts.
+- the speech queue and any pending TTS requests are cancelled, and the panda stops talking.
 
-The reducer accepts `LISTEN` from any state, and every async callback checks its `AbortController` or its TTS generation number, so a late chunk from the old answer can't leak into the new one.
+The user then presses the mic again to ask something else. The reducer accepts `LISTEN` from any state, and every async callback checks its `AbortController` or its TTS generation number, so a late chunk from the old answer can't leak into the new one.
 
-**Hands-free barge-in** adds one problem: the microphone hears the panda.
+**Hands-free barge-in** isn't built yet, and it adds one problem: the microphone hears the panda.
 
 - Keep the mic open while speaking, with `echoCancellation: true` (already set in `MicLevel`), and play TTS through the same audio context so the browser's echo canceller has a reference.
 - Run a VAD and require a few hundred milliseconds of speech above a threshold before treating it as an interruption, so coughs and short noises don't trigger it.
@@ -82,25 +89,29 @@ Ambiguous cases ("tell me about bears") are best handled by answering the panda 
 
 ## Q6. Video-based avatar
 
-Replace the shader portrait with short AI-generated clips per state: idle/listening loop, talking loop, refusal. The scene and the state machine stay the same. Only the avatar's texture source changes.
+This is how the avatar works today: three short AI-generated clips (`public/videos/`) for idle, thinking and talking, drawn on the same plane in a WebGL shader. The state machine didn't need to change, only the avatar's texture source.
 
-**Generating clips that connect seamlessly**
+**Making each clip loop**
 
-- Generate every clip from **the same neutral keyframe as both its first and last frame**. Most image-to-video models (Kling, Veo, MiniMax, Wan) accept a start frame and an end frame.
-- Lock the camera and keep a flat, solid background. Every clip then starts and ends on the same pixels, so any clip can follow any other at a loop boundary.
-- If one long take is generated instead, cut it at frames where the pose matches the neutral frame. To find those frames automatically, compute the difference between each frame and the reference with ffmpeg plus a small script, and keep the minima.
+- Generated clips never quite end where they started, so `scripts/make-loop.ts` bakes the loop into the file. It skips the opening frames, whose color grade is off, and finds where the end can join the start.
+- The idle clip uses a quarter-second cross-fade at a join where the eyes are open on both sides, so a blink never blends into a double image.
+- The talk and think clips play forward then backward, because the head never returns to the same place and a cross-faded join would ghost.
+- Each clip plays on one `<video>` with the browser's native loop, so playback never seeks or freezes at the wrap.
 
-**Transparency and compositing**
+**Transparency**
 
-- Remove the background with a matting model rather than a chroma key, because fur edges need soft alpha. RobustVideoMatting or BiRefNet work, or a hosted background-removal tool.
-- Export as **stacked alpha**: color in the top half, alpha in the bottom half of a regular H.264 MP4. A WebGL shader recombines them. This works in every browser, including Safari, which can't play WebM with alpha. It also plugs straight into the existing panda plane, so the rim light, fade and shadows still apply.
+The clips are shot on a blue screen, and the shader keys it out and removes the blue that bleeds into the fur. It's simple and runs in every browser, including Safari, which can't play WebM with alpha.
 
-**Playback without seams**
+**Transitions**
 
-- Preload every clip in its own `<video>` element (muted, `playsInline`, decoded ahead of time). Each one feeds a `VideoTexture`.
-- Switch only at loop boundaries. Talking → idle waits for the current talk loop to end on the neutral frame, so the mouth never snaps shut halfway. An interruption is the one exception: it cross-fades within 120–150 ms, which hides small pose differences.
-- Cross-fade in the shader (two textures and a `mix` uniform) instead of with CSS opacity. That keeps a single composited layer, avoids black frames during the switch, and keeps the lighting consistent.
-- Use `requestVideoFrameCallback` to know exactly which frame is on screen, and to switch clips on the boundary frame.
-- Keep a still neutral frame as the poster texture, so first paint is instant while the videos load.
+- All three clips keep playing from the moment they load, so each texture is live before its state starts.
+- Transitions are cross-faded in the shader over 0.25 s (two textures and a `mix` uniform) rather than with CSS opacity. That keeps a single composited layer and avoids black frames during the switch.
+- Idle ↔ talk switches only when the eyes stay open on both clips for the whole fade, using eye tracks stored in `public/lipsync/mouths.json`, so a blink never cross-fades into open eyes. If the hidden clip is mid-blink, it's moved to the next frames where the eyes are open. Think has no eye track, so its fade isn't gated.
+- `requestVideoFrameCallback` reports which frame is really on screen, so the pasted mouth follows the head exactly.
+- The loading screen waits for every clip to buffer, so none of them first appears half-loaded. If the video can't load, the avatar falls back to the still portrait.
 
-Lip sync then becomes a choice. A generic talk loop is fine, since the challenge doesn't require exact lip sync. For accuracy, a viseme-indexed sprite set or a generative lip-sync pass applies, as in Q1.
+**What I'd improve next**
+
+- Generate every clip from the same neutral keyframe as both first and last frame, so any clip can follow any other with less blending.
+- Use a matting model (RobustVideoMatting, BiRefNet) with stacked alpha (color and alpha in one H.264 video) if the fur edges need softer alpha than a chroma key gives.
+- Add a dedicated refusal clip. Today a refusal uses the talk clip plus a small head shake.
