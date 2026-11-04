@@ -14,7 +14,7 @@ const LANG_LABEL: Record<Lang, string> = { en: "EN", fr: "FR", zh: "中" };
 const HTML_LANG: Record<Lang, string> = { en: "en", fr: "fr", zh: "zh-CN" };
 
 export function App() {
-  const { state, lang, noVoice, sttSupported, toggleMic, ask, interrupt, changeLang } = useConversation();
+  const { state, lang, noVoice, usage, sttSupported, toggleMic, ask, interrupt, changeLang } = useConversation();
   const t = STRINGS[lang];
   const [typing, setTyping] = useState(!sttSupported);
   const [draft, setDraft] = useState("");
@@ -170,6 +170,13 @@ export function App() {
       </main>
 
       {showDebug && <DebugPanel title={t.debug} />}
+
+      {usage && (
+        <p className="usage glass" title={t.usageHint}>
+          {usage.approximate && "≈ "}
+          {usage.max > 0 ? `${usage.used} / ${usage.max}` : usage.used} {t.usageLabel}
+        </p>
+      )}
     </div>
   );
 }

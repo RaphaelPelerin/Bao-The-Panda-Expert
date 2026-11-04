@@ -8,7 +8,9 @@ import {
   type AskRequest,
   type QwenRegion,
   type Turn,
+  type Usage,
 } from "../shared/protocol.js";
+import { createDailyLimit } from "./dailyLimit.js";
 import { readVerdict } from "./guard.js";
 import { REFUSALS } from "./prompt.js";
 import { makeQwenProvider } from "./providers/index.js";
@@ -20,8 +22,33 @@ try {
 }
 
 const MAX_BODY_BYTES = 16_000;
+const dailyLimit = createDailyLimit(process.env);
+
+/** Uses one question. If the count can't be reached, the question goes through: a broken counter shouldn't silence the panda. */
+export async function takeQuestion(): Promise<{ allowed: boolean; usage: Usage | null }> {
+  try {
+    return await dailyLimit.take();
+  } catch (error) {
+    console.error("[limit] could not count the question:", error);
+    return { allowed: true, usage: null };
+  }
+}
+
+export async function currentUsage(): Promise<Usage | null> {
+  try {
+    return await dailyLimit.usage();
+  } catch (error) {
+    console.error("[limit] could not read today's count:", error);
+    return null;
+  }
+}
 
 export async function handleAsk(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  if (req.method === "GET") {
+    res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+    res.end(JSON.stringify(await currentUsage()));
+    return;
+  }
   if (req.method !== "POST") {
     res.writeHead(405, { Allow: "POST" }).end();
     return;
@@ -43,6 +70,13 @@ export async function handleAsk(req: IncomingMessage, res: ServerResponse): Prom
     return;
   }
 
+  const question = await takeQuestion();
+  if (!question.allowed) {
+    res.writeHead(429, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "Daily limit reached", usage: question.usage }));
+    return;
+  }
+
   res.writeHead(200, {
     "Content-Type": "text/event-stream; charset=utf-8",
     "Cache-Control": "no-cache, no-transform",
@@ -50,6 +84,7 @@ export async function handleAsk(req: IncomingMessage, res: ServerResponse): Prom
     "X-Accel-Buffering": "no",
   });
   const send = (event: AskEvent) => res.write(`data: ${JSON.stringify(event)}\n\n`);
+  if (question.usage) send({ type: "usage", ...question.usage });
 
   const abort = new AbortController();
   res.on("close", () => {

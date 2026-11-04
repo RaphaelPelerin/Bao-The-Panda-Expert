@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { parseRequest, serverApiKey, streamAsk } from "../server/ask.js";
+import { currentUsage, parseRequest, serverApiKey, streamAsk, takeQuestion } from "../server/ask.js";
 import type { AskEvent } from "../shared/protocol.js";
 
 export const config = {
@@ -12,6 +12,11 @@ export const config = {
 
 /** Vercel serverless: key from LLM_API_KEY env (never from the browser). */
 export default async function handler(req: VercelRequest, res: VercelResponse): Promise<void> {
+  if (req.method === "GET") {
+    res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+    res.end(JSON.stringify(await currentUsage()));
+    return;
+  }
   if (req.method !== "POST") {
     res.status(405).setHeader("Allow", "POST").end();
     return;
@@ -31,6 +36,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     return;
   }
 
+  const question = await takeQuestion();
+  if (!question.allowed) {
+    res.status(429).json({ error: "Daily limit reached", usage: question.usage });
+    return;
+  }
+
   res.writeHead(200, {
     "Content-Type": "text/event-stream; charset=utf-8",
     "Cache-Control": "no-cache, no-transform",
@@ -41,6 +52,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   const send = (event: AskEvent) => {
     res.write(`data: ${JSON.stringify(event)}\n\n`);
   };
+  if (question.usage) send({ type: "usage", ...question.usage });
 
   // Listen on the response: req "close" fires as soon as the body has been read,
   // which would cancel every answer before it starts.

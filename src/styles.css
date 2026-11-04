@@ -490,6 +490,22 @@ button {
   cursor: pointer;
 }
 
+/* ---------- daily usage ---------- */
+
+.usage {
+  position: absolute;
+  z-index: 2;
+  right: 16px;
+  bottom: 16px;
+  margin: 0;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-soft);
+}
+
 /* ---------- debug ---------- */
 
 .debug {

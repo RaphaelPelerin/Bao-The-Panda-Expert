@@ -9,6 +9,8 @@ const streamAsk = vi.hoisted(() => vi.fn());
 vi.mock("../server/ask.js", () => ({
   parseRequest: (raw: string) => JSON.parse(raw),
   serverApiKey: () => "test-key",
+  takeQuestion: async () => ({ allowed: true, usage: null }),
+  currentUsage: async () => null,
   streamAsk,
 }));
 

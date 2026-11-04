@@ -35,8 +35,17 @@ export type AskEvent =
   /** Sent once the topic guard has decided. `inScope: false` means `text` deltas carry the refusal. */
   | { type: "verdict"; inScope: boolean; provider: string }
   | { type: "delta"; text: string }
+  | ({ type: "usage" } & Usage)
   | { type: "done" }
   | { type: "error"; message: string };
+
+/** Today's questions across the whole site. A max of 0 means no limit. */
+export interface Usage {
+  used: number;
+  max: number;
+  /** The count isn't shared between server instances, so it can't be trusted exactly. */
+  approximate: boolean;
+}
 
 export const MAX_QUESTION_CHARS = 500;
 export const MAX_HISTORY_TURNS = 6;

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
-import type { Lang, Turn } from "../../shared/protocol";
+import type { Lang, Turn, Usage } from "../../shared/protocol";
 import { MAX_HISTORY_TURNS } from "../../shared/protocol";
 import { signals } from "../avatar/signals";
 import { askStream } from "../llm/askStream";
@@ -29,6 +29,12 @@ const STT_ERRORS: Record<SttErrorKind, Record<Lang, string>> = {
   },
 };
 
+const DAILY_LIMIT_REACHED: Record<Lang, string> = {
+  en: "That's all the questions I can answer today. Come back tomorrow!",
+  fr: "J'ai répondu à toutes les questions possibles pour aujourd'hui. Reviens demain !",
+  zh: "今天能回答的问题已经用完了，明天再来吧！",
+};
+
 const ANSWER_FAILED: Record<Lang, string> = {
   en: "I lost my train of thought. Please try again!",
   fr: "J'ai perdu le fil. Réessaie, s'il te plaît !",
@@ -49,6 +55,7 @@ export function useConversation() {
   const [state, dispatch] = useReducer(reduce, initialState);
   const [lang, setLang] = useState<Lang>("en");
   const [noVoice, setNoVoice] = useState(false);
+  const [usage, setUsage] = useState<Usage | null>(null);
   const langRef = useRef(lang);
   const history = useRef<Turn[]>([]);
   const request = useRef<AbortController | null>(null);
@@ -104,6 +111,19 @@ export function useConversation() {
     tts.reset();
   }, [stt, mic, tts]);
 
+  const refreshUsage = useCallback(async () => {
+    try {
+      const response = await fetch("/api/ask");
+      if (response.ok) setUsage((await response.json()) as Usage | null);
+    } catch {
+      // The counter is informative: without it, the panda still answers.
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshUsage();
+  }, [refreshUsage]);
+
   const ask = useCallback(
     (question: string) => {
       const text = question.trim();
@@ -123,6 +143,9 @@ export function useConversation() {
         (event) => {
           if (controller.signal.aborted) return;
           switch (event.type) {
+            case "usage":
+              setUsage({ used: event.used, max: event.max, approximate: event.approximate });
+              break;
             case "verdict":
               metrics.mark("verdict");
               metrics.provider(event.provider);
@@ -149,14 +172,13 @@ export function useConversation() {
         if (controller.signal.aborted) return;
         console.error(error);
         tts.reset();
-        const missing = error instanceof Error && error.message === "missing-key";
-        dispatch({
-          type: "FAIL",
-          message: missing ? SERVER_KEY_MISSING[langRef.current] : ANSWER_FAILED[langRef.current],
-        });
+        const reason = error instanceof Error ? error.message : "";
+        if (reason === "daily-limit") void refreshUsage();
+        const messages: Record<string, Record<Lang, string>> = { "missing-key": SERVER_KEY_MISSING, "daily-limit": DAILY_LIMIT_REACHED };
+        dispatch({ type: "FAIL", message: (messages[reason] ?? ANSWER_FAILED)[langRef.current] });
       });
     },
-    [interrupt, tts],
+    [interrupt, tts, refreshUsage],
   );
   askRef.current = ask;
 
@@ -200,6 +222,7 @@ export function useConversation() {
     state,
     lang,
     noVoice,
+    usage,
     sttSupported: isSttSupported(),
     toggleMic,
     ask,

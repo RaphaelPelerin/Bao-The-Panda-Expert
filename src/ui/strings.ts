@@ -21,6 +21,8 @@ export const STRINGS = {
     micStop: "Stop",
     noVoice: "This browser can't use the microphone, so type your question below.",
     voiceUnavailable: "Bao's voice isn't available right now, so answers are text only.",
+    usageLabel: "questions today",
+    usageHint: "Questions asked today across the whole site. The limit resets every day.",
     suggestions: [
       "What do pandas eat?",
       "Where do giant pandas live?",
@@ -51,6 +53,8 @@ export const STRINGS = {
     micStop: "Arrêter",
     noVoice: "Ce navigateur ne peut pas utiliser le micro : écris ta question ci-dessous.",
     voiceUnavailable: "La voix de Bao n'est pas disponible pour le moment : les réponses s'affichent seulement en texte.",
+    usageLabel: "questions aujourd'hui",
+    usageHint: "Questions posées aujourd'hui sur tout le site. La limite repart à zéro chaque jour.",
     suggestions: [
       "Que mangent les pandas ?",
       "Où vivent les pandas géants ?",
@@ -81,6 +85,8 @@ export const STRINGS = {
     micStop: "停止",
     noVoice: "这个浏览器不能使用麦克风，请在下面输入你的问题。",
     voiceUnavailable: "Bao 的声音暂时无法使用，回答只显示文字。",
+    usageLabel: "个问题（今日）",
+    usageHint: "今天全站已提问的数量。限额每天重置。",
     suggestions: [
       "熊猫吃什么？",
       "大熊猫住在哪里？",

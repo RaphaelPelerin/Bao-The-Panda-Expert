@@ -18,6 +18,9 @@ export async function askStream(
   if (response.status === 503) {
     throw new Error("missing-key");
   }
+  if (response.status === 429) {
+    throw new Error("daily-limit");
+  }
   if (!response.ok || !response.body) {
     throw new Error(`Server answered ${response.status}`);
   }
