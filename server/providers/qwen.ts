@@ -1,6 +1,6 @@
 import OpenAI from "openai";
-import { QWEN_MODEL, type AskRequest, type QwenRegion } from "../../shared/protocol";
-import { LANGUAGE_HINT, SYSTEM_PROMPT } from "../prompt";
+import { QWEN_MODEL, type AskRequest, type QwenRegion } from "../../shared/protocol.js";
+import { LANGUAGE_HINT, SYSTEM_PROMPT } from "../prompt.js";
 
 // Qwen Flash Character on Alibaba Cloud Model Studio, through its
 // OpenAI-compatible endpoint. Model id is fixed in shared/protocol.ts.

@@ -1,4 +1,4 @@
-import type { Lang } from "../shared/protocol";
+import type { Lang } from "../shared/protocol.js";
 
 export const PANDA_NAME = "Bao";
 

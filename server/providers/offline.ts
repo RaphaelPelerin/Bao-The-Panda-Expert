@@ -1,6 +1,6 @@
-import type { AskRequest } from "../../shared/protocol";
-import { TAG_IN, TAG_OUT } from "../prompt";
-import { answerOffline } from "./knowledge";
+import type { AskRequest } from "../../shared/protocol.js";
+import { TAG_IN, TAG_OUT } from "../prompt.js";
+import { answerOffline } from "./knowledge.js";
 
 const WORD_DELAY_MS = 18;
 

@@ -1,5 +1,5 @@
-import type { AskRequest, QwenRegion } from "../../shared/protocol";
-import { qwenConfig, qwenUnavailability, streamQwen, type Unavailability } from "./qwen";
+import type { AskRequest, QwenRegion } from "../../shared/protocol.js";
+import { qwenConfig, qwenUnavailability, streamQwen, type Unavailability } from "./qwen.js";
 
 export interface Provider {
   /** Shown in the latency panel and the server log. */

@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 import { readFile, stat } from "node:fs/promises";
 import { extname, join, normalize, resolve } from "node:path";
-import { handleAsk } from "./ask";
+import { handleAsk } from "./ask.js";
 
 // Production server: serves the built app from dist/ and the /api/ask endpoint.
 // In development, vite.config.ts mounts the same handler instead.

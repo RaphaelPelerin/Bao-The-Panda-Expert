@@ -8,10 +8,10 @@ import {
   type AskRequest,
   type QwenRegion,
   type Turn,
-} from "../shared/protocol";
-import { readVerdict } from "./guard";
-import { REFUSALS } from "./prompt";
-import { makeQwenProvider } from "./providers";
+} from "../shared/protocol.js";
+import { readVerdict } from "./guard.js";
+import { REFUSALS } from "./prompt.js";
+import { makeQwenProvider } from "./providers/index.js";
 
 try {
   process.loadEnvFile();

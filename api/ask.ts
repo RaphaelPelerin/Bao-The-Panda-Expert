@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { parseRequest, serverApiKey, streamAsk } from "../server/ask";
-import type { AskEvent } from "../shared/protocol";
+import { parseRequest, serverApiKey, streamAsk } from "../server/ask.js";
+import type { AskEvent } from "../shared/protocol.js";
 
 export const config = {
   api: {

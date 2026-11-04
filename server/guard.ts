@@ -1,4 +1,4 @@
-import { TAG_IN, TAG_OUT } from "./prompt";
+import { TAG_IN, TAG_OUT } from "./prompt.js";
 
 export type Verdict = "in" | "out";
 

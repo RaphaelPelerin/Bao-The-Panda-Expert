@@ -1,5 +1,5 @@
-import type { Lang, Turn } from "../../shared/protocol";
-import { REFUSALS } from "../prompt";
+import type { Lang, Turn } from "../../shared/protocol.js";
+import { REFUSALS } from "../prompt.js";
 
 // Offline fallback: a small rule-based panda expert used when Qwen is not
 // configured or unreachable. It keeps the demo working and is fully testable.
