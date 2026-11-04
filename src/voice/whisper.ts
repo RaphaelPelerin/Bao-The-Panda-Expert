@@ -1,4 +1,5 @@
 import type { Lang } from "../../shared/protocol";
+import { loading } from "../loading";
 import { prepareAudio } from "./wav";
 
 // Free on-device speech-to-text. Whisper tiny runs entirely in the browser —
@@ -13,13 +14,20 @@ type Transcriber = (
 const WHISPER_LANG: Record<Lang, string> = { en: "english", fr: "french", zh: "chinese" };
 const REMOTE_HOSTS = ["https://hf-mirror.com", "https://huggingface.co"] as const;
 
-let loading: Promise<Transcriber> | null = null;
+let starting: Promise<Transcriber> | null = null;
 let transcriber: Transcriber | null = null;
 
 export function warmWhisper(): void {
-  void getTranscriber().catch((error) => {
+  const load = getTranscriber();
+  loading.track("whisper", load);
+  void load.catch((error) => {
     console.warn("[whisper] warm-up failed", error);
   });
+}
+
+/** The model still has to start after its last byte arrives, so downloading stops short of full. */
+function onProgress(info: { status: string; progress?: number }): void {
+  if (info.status === "progress_total" && info.progress !== undefined) loading.report("whisper", (info.progress / 100) * 0.9);
 }
 
 export async function transcribeLocal(chunks: Float32Array[], sampleRate: number, lang: Lang): Promise<string> {
@@ -32,12 +40,12 @@ export async function transcribeLocal(chunks: Float32Array[], sampleRate: number
 
 async function getTranscriber(): Promise<Transcriber> {
   if (transcriber) return transcriber;
-  if (!loading) loading = loadTranscriber();
+  if (!starting) starting = loadTranscriber();
   try {
-    transcriber = await loading;
+    transcriber = await starting;
     return transcriber;
   } catch (error) {
-    loading = null;
+    starting = null;
     throw error;
   }
 }
@@ -55,6 +63,7 @@ async function loadTranscriber(): Promise<Transcriber> {
       const pipe = await pipeline("automatic-speech-recognition", "Xenova/whisper-tiny", {
         dtype: "q8",
         device: "wasm",
+        progress_callback: onProgress,
       });
       return pipe as unknown as Transcriber;
     } catch (error) {
@@ -66,7 +75,7 @@ async function loadTranscriber(): Promise<Transcriber> {
   // Last resort: library defaults (huggingface.co).
   try {
     env.remoteHost = "https://huggingface.co";
-    const pipe = await pipeline("automatic-speech-recognition", "Xenova/whisper-tiny");
+    const pipe = await pipeline("automatic-speech-recognition", "Xenova/whisper-tiny", { progress_callback: onProgress });
     return pipe as unknown as Transcriber;
   } catch (error) {
     throw lastError ?? error;

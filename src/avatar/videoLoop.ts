@@ -11,6 +11,8 @@ export class VideoLoop {
   readonly texture: THREE.VideoTexture;
   /** Resolves once the first frame is ready; rejects if the clip cannot load. */
   readonly loaded: Promise<void>;
+  /** Resolves once the clip can play to its end without stopping to buffer, or has failed to load. */
+  readonly buffered: Promise<void>;
   /** Media time of the last presented frame; null where requestVideoFrameCallback is missing. */
   private presentedTime: number | null = null;
   private frameCallback = 0;
@@ -46,6 +48,11 @@ export class VideoLoop {
         },
         { once: true },
       );
+    });
+
+    this.buffered = new Promise<void>((resolve) => {
+      video.addEventListener("canplaythrough", () => resolve(), { once: true });
+      video.addEventListener("error", () => resolve(), { once: true });
     });
   }
 

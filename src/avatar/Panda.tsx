@@ -1,6 +1,7 @@
 import { useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
+import { loading, type LoadItem } from "../loading";
 import { cutOutBackground } from "./cutout";
 import { lipSync } from "./lipsync";
 import { MouthAtlas, type MouthCell } from "./mouthAtlas";
@@ -190,6 +191,7 @@ export function Panda() {
   useEffect(() => {
     let cancelled = false;
     const loop = new VideoLoop(VIDEO.url);
+    loading.track("idleVideo", loop.buffered);
     const retryOnTap = () => {
       window.removeEventListener("pointerdown", retryOnTap);
       loop.start().catch((error) => console.warn("Avatar video still blocked:", error));
@@ -226,8 +228,9 @@ export function Panda() {
   const [think, setThink] = useState<VideoLoop | null>(null);
   useEffect(() => {
     let cancelled = false;
-    const start = (url: string, label: string, set: (loop: VideoLoop) => void) => {
+    const start = (url: string, label: string, item: LoadItem, set: (loop: VideoLoop) => void) => {
       const loop = new VideoLoop(url);
+      loading.track(item, loop.buffered);
       const retryOnTap = () => {
         window.removeEventListener("pointerdown", retryOnTap);
         loop.start().catch((error) => console.warn(`${label} video still blocked:`, error));
@@ -250,8 +253,8 @@ export function Panda() {
         loop.dispose();
       };
     };
-    const stopTalk = start(TALK_VIDEO_URL, "Talk", setTalk);
-    const stopThink = start(THINK_VIDEO_URL, "Think", setThink);
+    const stopTalk = start(TALK_VIDEO_URL, "Talk", "talkVideo", setTalk);
+    const stopThink = start(THINK_VIDEO_URL, "Think", "thinkVideo", setThink);
     return () => {
       cancelled = true;
       stopTalk();
@@ -263,7 +266,9 @@ export function Panda() {
   const [atlas, setAtlas] = useState<MouthAtlas | null>(null);
   useEffect(() => {
     let cancelled = false;
-    MouthAtlas.load()
+    const load = MouthAtlas.load();
+    loading.track("mouths", load);
+    load
       .then((loaded) => !cancelled && setAtlas(loaded))
       .catch((error) => console.warn("Lip sync unavailable:", error));
     return () => {
@@ -495,7 +500,11 @@ export function Panda() {
     // The video already breathes; the still portrait needs a little help.
     u.uBreath.value = source?.kind === "image" ? Math.sin(t * 1.55) * 0.0045 : 0;
     u.uSway.value = Math.sin(t * 0.62) * 0.004;
-    if (source) u.uFade.value = ease(u.uFade.value, 1, 2);
+    if (source) {
+      // Already fading in means it was drawn once, so the shaders are compiled.
+      if (u.uFade.value > 0) loading.report("panda");
+      u.uFade.value = ease(u.uFade.value, 1, 2);
+    }
 
     if (mesh.current) {
       mesh.current.scale.setScalar(layout.scale * m.lean);

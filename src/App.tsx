@@ -1,14 +1,19 @@
 import { Suspense, lazy, useEffect, useRef, useState, type FormEvent } from "react";
 import { LANGS, type Lang } from "../shared/protocol";
+import { loading } from "./loading";
 import { BambooFrame } from "./scene/BambooFrame";
+import { SceneBoundary } from "./scene/SceneBoundary";
 import { useConversation } from "./state/useConversation";
 import { DebugPanel } from "./ui/DebugPanel";
 import { KeyboardIcon, LeafIcon, MicIcon, SendIcon } from "./ui/icons";
+import { LoadingScreen } from "./ui/LoadingScreen";
 import { MicButton } from "./ui/MicButton";
 import { STRINGS } from "./ui/strings";
 
-// three.js is the heaviest part of the bundle; the UI shows while it loads.
-const Scene = lazy(() => import("./scene/Scene").then((m) => ({ default: m.Scene })));
+// three.js is the heaviest part of the bundle, so it gets its own chunk.
+const sceneCode = import("./scene/Scene");
+loading.track("code", sceneCode);
+const Scene = lazy(() => sceneCode.then((m) => ({ default: m.Scene })));
 
 const LANG_LABEL: Record<Lang, string> = { en: "EN", fr: "FR", zh: "中" };
 const HTML_LANG: Record<Lang, string> = { en: "en", fr: "fr", zh: "zh-CN" };
@@ -66,11 +71,14 @@ export function App() {
 
   return (
     <div className="app" data-phase={state.status}>
-      <Suspense fallback={<div className="scene-loading" />}>
-        <div className="scene">
-          <Scene />
-        </div>
-      </Suspense>
+      <LoadingScreen label={t.loading} hint={t.loadingHint} />
+      <SceneBoundary>
+        <Suspense fallback={<div className="scene-loading" />}>
+          <div className="scene">
+            <Scene />
+          </div>
+        </Suspense>
+      </SceneBoundary>
       <BambooFrame />
 
       <header className="topbar">
