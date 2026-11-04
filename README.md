@@ -50,7 +50,7 @@ Serverless routes: `api/ask.ts` (answers) and `api/tts.ts` (voice), both with `L
 ```mermaid
 flowchart LR
   subgraph Browser["Browser · fully client speech"]
-    Mic["Mic → Whisper tiny\n(hf-mirror / HF, cached)"] --> Hook
+    Mic["Mic → Whisper tiny\n(hosted here, cached)"] --> Hook
     Type["Type / suggestions"] --> Hook
     Hook["useConversation\nstate machine"] --> SSE["askStream SSE"]
     Hook --> TTS["/api/tts stream\n(falls back to local voices)"]
@@ -133,5 +133,5 @@ DISCUSSION.md        assignment follow-up Q1–Q6
 - Bao's voice is `xunanchuan_v3.1`, male, with a slightly raised pitch and a "cartoon panda" style instruction. Each sentence is billed to the Model Studio account (about $0.0001 for two sentences); requests are capped in length.
 - `QWEN_DAILY_LIMIT` caps questions per day for the whole site, and the count shows at the bottom right. On Vercel it needs Upstash Redis (`UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`) to be exact; without it each serverless instance counts alone and the number shows as approximate. It counts questions: `/api/tts` can still be called directly.
 - If the voice service fails, answers use a local voice, or stay silent with a notice.
-- First mic use downloads Whisper tiny from hf-mirror (then Hugging Face) into the browser cache.
+- Whisper tiny ([Xenova/whisper-tiny](https://huggingface.co/Xenova/whisper-tiny), Apache-2.0) is in `public/models`, and its runtime is copied to `public/ort` at build time, so speech recognition needs no third-party host. The first visit downloads about 70 MB into the browser cache.
 - Local fallback voices never include Google/Online cloud voices.

@@ -3,8 +3,9 @@ import { loading } from "../loading";
 import { prepareAudio } from "./wav";
 
 // Free on-device speech-to-text. Whisper tiny runs entirely in the browser —
-// no server proxy. Weights load from a public host (hf-mirror first for China,
-// then huggingface.co) and are cached by the browser.
+// no server proxy. The model (public/models) and its runtime (copied to /ort by
+// vite.config.ts) come from this site, because Hugging Face and the runtime's
+// default CDN can't be relied on from mainland China. Cached by the browser.
 
 type Transcriber = (
   audio: Float32Array,
@@ -12,8 +13,6 @@ type Transcriber = (
 ) => Promise<{ text?: string } | string>;
 
 const WHISPER_LANG: Record<Lang, string> = { en: "english", fr: "french", zh: "chinese" };
-const REMOTE_HOSTS = ["https://hf-mirror.com", "https://huggingface.co"] as const;
-
 let starting: Promise<Transcriber> | null = null;
 let transcriber: Transcriber | null = null;
 
@@ -52,32 +51,17 @@ async function getTranscriber(): Promise<Transcriber> {
 
 async function loadTranscriber(): Promise<Transcriber> {
   const { env, pipeline } = await import("@huggingface/transformers");
+  // This site as the "remote" host: in local mode the library downloads every file twice to learn its size.
   env.allowLocalModels = false;
+  env.remoteHost = location.origin;
+  env.remotePathTemplate = "models/{model}/";
   env.useBrowserCache = true;
-  env.remotePathTemplate = "{model}/resolve/{revision}/";
+  if (env.backends.onnx.wasm) env.backends.onnx.wasm.wasmPaths = "/ort/";
 
-  let lastError: unknown;
-  for (const host of REMOTE_HOSTS) {
-    try {
-      env.remoteHost = host;
-      const pipe = await pipeline("automatic-speech-recognition", "Xenova/whisper-tiny", {
-        dtype: "q8",
-        device: "wasm",
-        progress_callback: onProgress,
-      });
-      return pipe as unknown as Transcriber;
-    } catch (error) {
-      lastError = error;
-      console.warn(`[whisper] load via ${host} failed`, error);
-    }
-  }
-
-  // Last resort: library defaults (huggingface.co).
-  try {
-    env.remoteHost = "https://huggingface.co";
-    const pipe = await pipeline("automatic-speech-recognition", "Xenova/whisper-tiny", { progress_callback: onProgress });
-    return pipe as unknown as Transcriber;
-  } catch (error) {
-    throw lastError ?? error;
-  }
+  const pipe = await pipeline("automatic-speech-recognition", "Xenova/whisper-tiny", {
+    dtype: "q8",
+    device: "wasm",
+    progress_callback: onProgress,
+  });
+  return pipe as unknown as Transcriber;
 }

@@ -13,6 +13,7 @@ const PORT = Number(process.env.PORT) || 8787;
 const TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript",
+  ".mjs": "text/javascript",
   // Browsers reject WebAssembly streaming without this type.
   ".wasm": "application/wasm",
   ".css": "text/css",

@@ -4,3 +4,4 @@ dist
 .qwen-usage.json
 *.log
 raw/*.mp4
+public/ort/
