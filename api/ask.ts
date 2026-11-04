@@ -42,8 +42,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
     res.write(`data: ${JSON.stringify(event)}\n\n`);
   };
 
+  // Listen on the response: req "close" fires as soon as the body has been read,
+  // which would cancel every answer before it starts.
   const abort = new AbortController();
-  req.on("close", () => {
+  res.on("close", () => {
     if (!res.writableEnded) abort.abort();
   });
 

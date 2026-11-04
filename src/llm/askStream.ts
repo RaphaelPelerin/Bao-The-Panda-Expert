@@ -24,6 +24,7 @@ export async function askStream(
 
   const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
   let buffer = "";
+  let finished = false;
   try {
     while (true) {
       const { value, done } = await reader.read();
@@ -35,7 +36,10 @@ export async function askStream(
         const frame = buffer.slice(0, boundary);
         buffer = buffer.slice(boundary + 2);
         for (const line of frame.split("\n")) {
-          if (line.startsWith("data: ")) onEvent(JSON.parse(line.slice(6)) as AskEvent);
+          if (!line.startsWith("data: ")) continue;
+          const event = JSON.parse(line.slice(6)) as AskEvent;
+          if (event.type === "done" || event.type === "error") finished = true;
+          onEvent(event);
         }
       }
     }
@@ -43,4 +47,6 @@ export async function askStream(
     if (signal.aborted) return;
     throw error;
   }
+  // A reply cut short (crashed or killed function) must not leave the panda thinking forever.
+  if (!finished && !signal.aborted) throw new Error("The answer stream ended early");
 }
