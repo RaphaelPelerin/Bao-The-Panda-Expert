@@ -14,7 +14,7 @@ const LANG_LABEL: Record<Lang, string> = { en: "EN", fr: "FR", zh: "中" };
 const HTML_LANG: Record<Lang, string> = { en: "en", fr: "fr", zh: "zh-CN" };
 
 export function App() {
-  const { state, lang, sttSupported, toggleMic, ask, interrupt, changeLang } = useConversation();
+  const { state, lang, voiceNotice, sttSupported, toggleMic, ask, interrupt, changeLang } = useConversation();
   const t = STRINGS[lang];
   const [typing, setTyping] = useState(!sttSupported);
   const [draft, setDraft] = useState("");
@@ -127,6 +127,12 @@ export function App() {
         )}
 
         {!sttSupported && <p className="notice glass">{t.noVoice}</p>}
+        {voiceNotice?.kind === "loading" && (
+          <p className="notice glass" role="status">
+            {t.voiceLoading} {voiceNotice.percent}%
+          </p>
+        )}
+        {voiceNotice?.kind === "none" && <p className="notice glass">{t.voiceUnavailable}</p>}
 
         <p className={`status${state.status === "error" ? " is-error" : ""}`} role="status">
           {status}

@@ -29,7 +29,8 @@ export type ConversationEvent =
   | { type: "SPEECH_START" }
   | { type: "SPEECH_END" }
   | { type: "FAIL"; message: string }
-  | { type: "RESET" };
+  | { type: "RESET" }
+  | { type: "CLEAR" };
 
 export const initialState: ConversationState = {
   status: "idle",
@@ -76,5 +77,9 @@ export function reduce(state: ConversationState, event: ConversationEvent): Conv
 
     case "RESET":
       return state.status === "error" ? initialState : state;
+
+    case "CLEAR":
+      // Everything in flight was cancelled (language switch): no event will end it.
+      return initialState;
   }
 }

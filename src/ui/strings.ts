@@ -20,6 +20,8 @@ export const STRINGS = {
     micStart: "Start talking",
     micStop: "Stop",
     noVoice: "This browser can't use the microphone, so type your question below.",
+    voiceLoading: "Getting Bao's voice ready. Answers are silent until then.",
+    voiceUnavailable: "Bao's voice isn't available on this device, so answers are text only.",
     suggestions: [
       "What do pandas eat?",
       "Where do giant pandas live?",
@@ -49,6 +51,8 @@ export const STRINGS = {
     micStart: "Parler",
     micStop: "Arrêter",
     noVoice: "Ce navigateur ne peut pas utiliser le micro : écris ta question ci-dessous.",
+    voiceLoading: "Préparation de la voix de Bao. Les réponses restent muettes d'ici là.",
+    voiceUnavailable: "La voix de Bao n'est pas disponible sur cet appareil : les réponses s'affichent seulement en texte.",
     suggestions: [
       "Que mangent les pandas ?",
       "Où vivent les pandas géants ?",
@@ -78,6 +82,8 @@ export const STRINGS = {
     micStart: "开始说话",
     micStop: "停止",
     noVoice: "这个浏览器不能使用麦克风，请在下面输入你的问题。",
+    voiceLoading: "正在准备 Bao 的声音，在此之前回答没有声音。",
+    voiceUnavailable: "此设备无法使用 Bao 的声音，回答只显示文字。",
     suggestions: [
       "熊猫吃什么？",
       "大熊猫住在哪里？",

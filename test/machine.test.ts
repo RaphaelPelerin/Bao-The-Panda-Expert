@@ -41,6 +41,13 @@ describe("conversation state machine", () => {
     expect(reduce(thinking, { type: "SPEECH_END" }).status).toBe("idle");
   });
 
+  it("returns to idle from any state on CLEAR, such as switching language mid-answer", () => {
+    const speaking = run([{ type: "QUESTION", text: "q" }, { type: "ANSWER_DELTA", text: "a" }, { type: "SPEECH_START" }]);
+    expect(speaking.status).toBe("speaking");
+    expect(reduce(speaking, { type: "CLEAR" })).toEqual(initialState);
+    expect(reduce({ ...initialState, status: "listening" }, { type: "CLEAR" })).toEqual(initialState);
+  });
+
   it("recovers from errors with RESET", () => {
     const failed = run([{ type: "QUESTION", text: "q" }, { type: "FAIL", message: "oops" }]);
     expect(failed).toMatchObject({ status: "error", error: "oops" });

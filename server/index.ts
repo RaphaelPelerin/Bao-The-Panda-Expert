@@ -12,6 +12,8 @@ const PORT = Number(process.env.PORT) || 8787;
 const TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript",
+  // Browsers reject WebAssembly streaming without this type, which breaks Piper's phonemizer.
+  ".wasm": "application/wasm",
   ".css": "text/css",
   ".svg": "image/svg+xml",
   ".png": "image/png",

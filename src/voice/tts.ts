@@ -1,13 +1,26 @@
 import type { Lang } from "../../shared/protocol";
 import { lipSync } from "../avatar/lipsync";
 import { signals } from "../avatar/signals";
+import { PiperVoice } from "./piperVoice";
+import { chooseEngine, isMaleVoiceName, voiceNotice, type PiperState, type VoiceNotice } from "./voiceStatus";
 
 export interface TtsHandlers {
   /** First sentence of an answer became audible. */
   onStart(): void;
   /** Every queued sentence finished and the answer is complete. */
   onDone(): void;
+  /** Whether the visitor should be told that answers are silent for now. */
+  onNotice(notice: VoiceNotice): void;
 }
+
+interface QueuedSentence {
+  text: string;
+  /** Piper's rendering, started as soon as the sentence arrives. Null when Piper isn't ready. */
+  audio: Promise<ArrayBuffer | null> | null;
+}
+
+/** How long to wait for a suspended AudioContext before using another voice. */
+const AUDIO_RESUME_TIMEOUT_MS = 500;
 
 const LOCALES: Record<Lang, string> = { en: "en-US", fr: "fr-FR", zh: "zh-CN" };
 /** Prefer voices that ship with the OS. */
@@ -19,12 +32,13 @@ export function isCloudVoice(voice: { name: string; voiceURI?: string }): boolea
 }
 
 /**
- * Sentence queue over the browser's free local speechSynthesis. No Google
- * speech and no paid/LLM speech API. Cloud voices are skipped. Without a
- * matching local voice it runs a silent timer so the conversation still moves.
+ * Sentence queue with free, on-device voices only: no cloud or paid speech API.
+ * Each sentence uses Piper (neural voice in a worker) when it has loaded, else
+ * the browser's local speechSynthesis (cloud voices are skipped), else a silent
+ * timer so the conversation still moves.
  */
 export class SpeechOutput {
-  private queue: string[] = [];
+  private queue: QueuedSentence[] = [];
   private finished = false;
   private active = false;
   private started = false;
@@ -34,6 +48,13 @@ export class SpeechOutput {
   // Chrome can garbage-collect a playing utterance and drop its events; keep a reference.
   private current: SpeechSynthesisUtterance | null = null;
   private readonly synth = typeof speechSynthesis === "undefined" ? null : speechSynthesis;
+  private readonly piper = new PiperVoice((state) => {
+    this.piperState = state;
+    this.reportNotice();
+  });
+  private piperState: PiperState = { state: "idle" };
+  private audioContext: AudioContext | null = null;
+  private source: AudioBufferSourceNode | null = null;
 
   constructor(private readonly handlers: TtsHandlers) {
     this.synth?.addEventListener("voiceschanged", () => this.pickVoice());
@@ -43,12 +64,21 @@ export class SpeechOutput {
   setLang(lang: Lang): void {
     this.lang = lang;
     this.pickVoice();
+    if (this.piperState.state !== "idle") this.piper.preload(lang);
+  }
+
+  /** Starts downloading the neural voice for the current language. */
+  preload(): void {
+    this.piper.preload(this.lang);
   }
 
   enqueue(sentence: string): void {
     const text = sentence.trim();
     if (!text) return;
-    this.queue.push(text);
+    // Render right away, so the next sentence is often ready before the current one ends.
+    const engine = chooseEngine(this.lang, this.piper.isReady(this.lang), this.voice?.name ?? null);
+    const audio = engine === "piper" ? this.piper.synthesize(text).catch(logAndFallBack) : null;
+    this.queue.push({ text, audio });
     this.pump();
   }
 
@@ -68,6 +98,11 @@ export class SpeechOutput {
     if (this.current) this.current.onend = this.current.onerror = null;
     this.current = null;
     this.synth?.cancel();
+    if (this.source) {
+      this.source.onended = null;
+      this.source.stop();
+      this.source = null;
+    }
     signals.speaking = false;
     lipSync.stop();
   }
@@ -92,9 +127,61 @@ export class SpeechOutput {
       if (generation !== this.generation) return;
       this.active = false;
       this.current = null;
+      this.source = null;
       this.pump();
     };
 
+    if (next.audio) {
+      void this.playPiper(next, generation, done);
+    } else {
+      this.speakFallback(next.text, generation, done);
+    }
+  }
+
+  /** Plays Piper's rendering, or falls back if it failed or can't be played. */
+  private async playPiper(sentence: QueuedSentence, generation: number, done: () => void): Promise<void> {
+    const wav = await sentence.audio;
+    if (generation !== this.generation) return;
+    try {
+      if (!wav) throw new Error("no audio");
+      const context = await this.runningAudioContext();
+      const buffer = await context.decodeAudioData(wav);
+      if (generation !== this.generation) return;
+
+      const source = context.createBufferSource();
+      source.buffer = buffer;
+      source.connect(context.destination);
+      source.onended = () => {
+        if (generation === this.generation) lipSync.stop();
+        done();
+      };
+      this.source = source;
+      source.start();
+      this.markStarted();
+      // Real audio: the mouth timeline can match its exact length.
+      lipSync.start(sentence.text, this.lang, 1, buffer.duration * 1000);
+    } catch (error) {
+      if (generation !== this.generation) return;
+      console.warn("[tts] Piper playback failed, using another voice", error);
+      this.speakFallback(sentence.text, generation, done);
+    }
+  }
+
+  private async runningAudioContext(): Promise<AudioContext> {
+    this.audioContext ??= new AudioContext();
+    const context = this.audioContext;
+    if (context.state !== "running") {
+      await Promise.race([
+        context.resume(),
+        new Promise((resolve) => setTimeout(resolve, AUDIO_RESUME_TIMEOUT_MS)),
+      ]);
+    }
+    if (context.state !== "running") throw new Error("Audio is blocked by the browser");
+    return context;
+  }
+
+  /** The browser's local voice, or a silent timer when there is none. */
+  private speakFallback(next: string, generation: number, done: () => void): void {
     if (!this.synth || !this.voice) {
       this.markStarted();
       const duration = silentDuration(next);
@@ -107,7 +194,6 @@ export class SpeechOutput {
     utterance.lang = LOCALES[this.lang];
     utterance.voice = this.voice;
     utterance.rate = 1.02;
-    utterance.pitch = 1.12;
     utterance.onstart = () => {
       if (generation !== this.generation) return;
       this.markStarted();
@@ -136,8 +222,19 @@ export class SpeechOutput {
     const matching = voices.filter((v) => voiceMatches(v.lang, this.lang) && !isCloudVoice(v));
     const mandarin = this.lang === "zh" ? matching.filter((v) => /^(zh-cn|zh-hans|cmn)/i.test(v.lang.replace("_", "-"))) : matching;
     const pool = mandarin.length ? mandarin : matching;
-    this.voice = pool.find((v) => LOCAL_HINT.test(v.name)) ?? pool.find((v) => v.default) ?? pool[0] ?? null;
+    this.voice =
+      pool.find((v) => isMaleVoiceName(v.name)) ?? pool.find((v) => LOCAL_HINT.test(v.name)) ?? pool.find((v) => v.default) ?? pool[0] ?? null;
+    this.reportNotice();
   }
+
+  private reportNotice(): void {
+    this.handlers.onNotice(voiceNotice(this.piperState, Boolean(this.voice)));
+  }
+}
+
+function logAndFallBack(error: unknown): null {
+  console.warn("[tts] Piper could not render a sentence", error);
+  return null;
 }
 
 /** Mandarin is about four syllables a second; everything else stays near 170 words a minute. */
