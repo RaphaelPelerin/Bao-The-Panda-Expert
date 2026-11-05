@@ -2,7 +2,9 @@
 
 Bao only talks about pandas. You ask by voice or by typing; Bao answers out loud, with a living avatar in a bamboo forest. Off-topic questions get a polite refusal.
 
-**[Live demo](https://bao-the-panda-expert.vercel.app)** · **[Demo video](docs/demo.mp4)** · **[Architecture](docs/architecture.svg)** · **[Technical discussion Q1–Q6](DISCUSSION.md)**
+**Live demo:** [https://bao-the-panda-expert.vercel.app/](https://bao-the-panda-expert.vercel.app/)
+
+**[Demo video](docs/demo.mp4)** · **[Architecture](docs/architecture.svg)** · **[Technical discussion Q1–Q6](DISCUSSION.md)**
 
 ---
 
@@ -34,6 +36,8 @@ Visitors never enter a key — the server uses `LLM_API_KEY`.
 | `npm run eval` | Live topic-guard check |
 
 ### Deploy on Vercel
+
+Production site: [https://bao-the-panda-expert.vercel.app/](https://bao-the-panda-expert.vercel.app/)
 
 1. Import the Git repo (Framework: **Vite**, output `dist`).
 2. In **Project → Settings → Environment Variables**, set:
